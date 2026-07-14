@@ -163,6 +163,7 @@ class StandardChecker:
         self._check_figure_table_numbering()
         self._check_references()
         self._check_percentage_tolerance()
+        self._check_hyphen_consistency()  # 新增：连字符一致性检查
         
         return self.issues
     
@@ -235,8 +236,34 @@ class StandardChecker:
         all_text = " ".join([p["text"] for p in self.paragraphs])
         
         for elem in required_elements:
-            found_in_heading = any(elem in h for h in heading_texts)
-            found_in_text = elem in all_text
+            # 改进的识别逻辑：移除空格后检查
+            found_in_heading = False
+            found_in_text = False
+            
+            # 检查标题（考虑空格）
+            for h in heading_texts:
+                # 移除所有类型的空格（半角、全角、特殊空格）
+                h_no_space = h.replace(' ', '').replace('　', '').replace('\u2002', '').replace('\u2003', '')
+                if elem in h_no_space or h_no_space == elem:
+                    found_in_heading = True
+                    # 检查标题是否包含空格
+                    if ' ' in h or '　' in h or '\u2002' in h or '\u2003' in h:
+                        self._add_issue(
+                            "F008",
+                            Severity.WARNING,
+                            f"标题",
+                            f"\"{elem}\"标题包含装饰性空格",
+                            "标题文字内部不应包含空格",
+                            h
+                        )
+                    break
+            
+            # 检查全文
+            for p in self.paragraphs:
+                text_no_space = p["text"].replace(' ', '').replace('　', '')
+                if elem in text_no_space:
+                    found_in_text = True
+                    break
             
             if not found_in_text:
                 self._add_issue(
@@ -245,15 +272,6 @@ class StandardChecker:
                     "整体",
                     f"缺少必备要素\"{elem}\"",
                     f"补充\"{elem}\"要素"
-                )
-            elif not found_in_heading:
-                # 要素存在但可能格式不规范
-                self._add_issue(
-                    "S010",
-                    Severity.WARNING,
-                    "整体",
-                    f"\"{elem}\"要素可能存在但格式不规范",
-                    f"检查\"{elem}\"是否使用了正确的标题样式"
                 )
         
         # 检查要素顺序
@@ -506,6 +524,51 @@ class StandardChecker:
                     "百分率公差格式错误",
                     "使用括号包裹，如 (65+/-2)%"
                 )
+    
+    def _check_hyphen_consistency(self) -> None:
+        """检查连字符一致性（新增）"""
+        # 检查标准引用中的连字符格式
+        # 半角连字符模式：GB/T 20258.2-2019
+        half_width_pattern = re.compile(r'GB/T\s+\d+\.?\d*-(\d{4})')
+        # 全角连字符模式：GB/T 1.1—2020
+        full_width_pattern = re.compile(r'GB/T\s+\d+\.?\d*—(\d{4})')
+        
+        half_width_refs = []
+        full_width_refs = []
+        
+        for para in self.paragraphs:
+            text = para["text"]
+            
+            # 查找半角连字符
+            for match in half_width_pattern.finditer(text):
+                half_width_refs.append({
+                    "text": match.group(),
+                    "location": f"段落 {para['index']}"
+                })
+            
+            # 查找全角连字符
+            for match in full_width_pattern.finditer(text):
+                full_width_refs.append({
+                    "text": match.group(),
+                    "location": f"段落 {para['index']}"
+                })
+        
+        # 如果同时存在半角和全角连字符，报告不一致
+        if half_width_refs and full_width_refs:
+            # 构建上下文信息
+            half_examples = [ref["text"] for ref in half_width_refs[:3]]
+            full_examples = [ref["text"] for ref in full_width_refs[:3]]
+            
+            context = f"半角示例：{', '.join(half_examples)}\n全角示例：{', '.join(full_examples)}"
+            
+            self._add_issue(
+                "F009",
+                Severity.WARNING,
+                "整体",
+                f"标准引用中的连字符格式不一致：{len(half_width_refs)}处使用半角"-"，{len(full_width_refs)}处使用全角"—"",
+                "统一使用半角连字符"-"（推荐）或全角连字符"—"",
+                context
+            )
 
 
 def main():
