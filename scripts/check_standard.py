@@ -21,6 +21,15 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 from collections import Counter
 
+# 多标准支持
+from standard_profiles import (
+    StandardProfile,
+    get_profile,
+    list_profiles,
+    auto_detect,
+    is_rule_enabled,
+)
+
 
 class Severity(Enum):
     ERROR = "ERROR"
@@ -126,15 +135,22 @@ class StyleAnalyzer:
 
 
 class StandardChecker:
-    """GB/T 1.1-2020 标准草稿检查器"""
-    
-    def __init__(self):
+    """标准草稿检查器（支持多标准类型）"""
+
+    def __init__(self, standard: str = None):
+        """
+        Args:
+            standard: 标准类型 ID。None 时在 check() 中自动检测。
+        """
         self.issues: List[Issue] = []
         self.paragraphs: List[Dict] = []
         self.headings: List[Dict] = []
         self.style_analyzer = StyleAnalyzer()
         self.doc = None
         self.section_map: Dict[int, str] = {}
+        # 多标准配置
+        self.profile: Optional[StandardProfile] = None
+        self._pending_standard = standard  # 延迟到段落提取后再解析
         
     def check(self, file_path: str, analyze_styles: bool = False) -> List[Issue]:
         """执行检查（支持 .docx 和 .pdf 格式）"""
@@ -178,7 +194,16 @@ class StandardChecker:
         
         # 提取文档结构
         self._extract_structure(doc)
-        
+
+        # 确定标准类型 profile
+        if self._pending_standard:
+            self.profile = get_profile(self._pending_standard)
+        else:
+            detected = auto_detect(self.paragraphs)
+            self.profile = get_profile(detected)
+        print(f"标准类型：{self.profile.name}（{self.profile.id}）")
+        print(f"起草依据：{self.profile.drafting_standard}")
+
         # 执行各项检查
         self._check_structure()
         self._check_headings()
@@ -205,7 +230,13 @@ class StandardChecker:
         self._check_footnote_requirements()        # T007
         self._check_term_definition_requirements() # T009
         self._check_term_bold()                    # W003
-        
+
+        # 标准类型专属检查
+        for check_name in self.profile.specific_checks:
+            method = getattr(self, check_name, None)
+            if method:
+                method()
+
         return self.issues
     
     def _extract_structure(self, doc) -> None:
@@ -284,7 +315,10 @@ class StandardChecker:
     
     def _add_issue(self, code: str, severity: Severity, location: str,
                    description: str, suggestion: str, context: str = "") -> None:
-        """添加问题"""
+        """添加问题（自动按 profile 过滤禁用规则）"""
+        # 按 profile 过滤
+        if self.profile and not is_rule_enabled(self.profile, code):
+            return
         self.issues.append(Issue(
             code=code,
             severity=severity.value,
@@ -296,8 +330,8 @@ class StandardChecker:
     
     def _check_structure(self) -> None:
         """检查结构要素"""
-        # 检查必备要素
-        required_elements = ["前言", "范围"]
+        # 从 profile 获取必备要素
+        required_elements = self.profile.required_elements if self.profile else ["前言", "范围"]
         heading_texts = [h["text"] for h in self.headings]
         all_text = " ".join([p["text"] for p in self.paragraphs])
         
@@ -635,6 +669,133 @@ class StandardChecker:
                 '统一使用半角连字符"-"（推荐）或全角连字符"—"',
                 context
             )
+
+    # ===== 标准类型专属检查 =====
+
+    def _check_national_standard_number(self) -> None:
+        """MS001: 国家标准编号格式检查"""
+        all_text = " ".join(p["text"] for p in self.paragraphs)
+        # GB/T XXXXX-YYYY 或 GB XXXXX-YYYY
+        valid_pattern = re.compile(r'GB/T?\s*\d+\.?\d*[-—]\d{4}')
+        # 错误格式：使用冒号
+        wrong_pattern = re.compile(r'GB/T?\s*\d+\.?\d*[:：]\d{4}')
+
+        for para in self.paragraphs:
+            text = para["text"]
+            if wrong_pattern.search(text):
+                self._add_issue(
+                    "MS001",
+                    Severity.ERROR,
+                    f"段落 {para['index']}",
+                    "国家标准编号使用冒号连接年份",
+                    "使用一字线，如 GB/T 12345-2020",
+                    text[:100]
+                )
+
+    def _check_industry_standard_number(self) -> None:
+        """MS002: 行业标准编号格式检查"""
+        # 常见行业标准前缀
+        known_prefixes = {
+            "YY": "医药", "JB": "机械", "QB": "轻工", "CJ": "城镇建设",
+            "SL": "水利", "JG": "建筑工业", "GA": "公共安全", "HG": "化工",
+            "SY": "石油天然气", "DL": "电力", "TB": "铁路", "JT": "交通",
+            "TD": "土地管理", "LY": "林业", "NY": "农业", "SB": "商务",
+            "WS": "卫生", "YZ": "邮政", "AQ": "安全生产", "MT": "煤炭",
+            "YS": "有色金属", "EJ": "核工业", "QX": "气象", "DZ": "地震",
+            "GH": "城乡建设规划", "HJ": "环境保护", "DB": "地震（非地方标准）",
+            "CB": "船舶", "CH": "测绘", "CY": "新闻出版", "DA": "档案",
+            "FZ": "纺织", "GY": "广播影视", "HB": "航空", "JC": "建材",
+            "JJ": "计量", "SH": "石油化工", "SJ": "电子", "SN": "商检",
+            "WH": "文化", "WJ": "兵工民品", "WM": "外经贸", "XB": "稀土",
+            "ZB": "专业标准",
+        }
+
+        for para in self.paragraphs:
+            text = para["text"]
+            # 匹配行业标准编号
+            m = re.match(r'^([A-Z]{2})/T?\s*\d+', text)
+            if m:
+                prefix = m.group(1)
+                if prefix == "GB":
+                    continue
+                if prefix not in known_prefixes:
+                    self._add_issue(
+                        "MS002",
+                        Severity.WARNING,
+                        f"段落 {para['index']}",
+                        f"行业标准编号前缀\"{prefix}\"不在已知行业代号列表中",
+                        "核实行业代号是否正确",
+                        text[:100]
+                    )
+
+    def _check_local_standard_number(self) -> None:
+        """MS003: 地方标准编号格式检查"""
+        # DBXX/T XXXXX-YYYY，XX 为行政区划代码
+        # 有效的省级行政区划代码
+        valid_codes = {
+            "11": "北京", "12": "天津", "13": "河北", "14": "山西", "15": "内蒙古",
+            "21": "辽宁", "22": "吉林", "23": "黑龙江",
+            "31": "上海", "32": "江苏", "33": "浙江", "34": "安徽", "35": "福建", "36": "江西",
+            "37": "山东",
+            "41": "河南", "42": "湖北", "43": "湖南", "44": "广东", "45": "广西", "46": "海南",
+            "50": "重庆", "51": "四川", "52": "贵州", "53": "云南", "54": "西藏",
+            "61": "陕西", "62": "甘肃", "63": "青海", "64": "宁夏", "65": "新疆",
+            "71": "中国台湾", "81": "中国香港", "82": "中国澳门",
+        }
+
+        for para in self.paragraphs:
+            text = para["text"]
+            # 匹配 DB + 2位数字 + /T?
+            m = re.search(r'DB(\d{2})/?T?\s*\d+', text)
+            if m:
+                code = m.group(1)
+                if code not in valid_codes:
+                    self._add_issue(
+                        "MS003",
+                        Severity.ERROR,
+                        f"段落 {para['index']}",
+                        f"地方标准区域代码\"{code}\"无效",
+                        "使用正确的省级行政区划代码（如 11=北京, 31=上海, 44=广东）",
+                        text[:100]
+                    )
+
+    def _check_enterprise_standard_number(self) -> None:
+        """MS004: 企业标准编号格式检查"""
+        for para in self.paragraphs:
+            text = para["text"]
+            # Q/XXXXXXXX-YYYY
+            # 检查是否缺少年份
+            m = re.search(r'Q/([A-Z]+)\s*\d+', text)
+            if m:
+                # 检查是否有年份
+                if not re.search(r'Q/[A-Z]+\s*\d+[-—:：]\d{4}', text):
+                    self._add_issue(
+                        "MS004",
+                        Severity.WARNING,
+                        f"段落 {para['index']}",
+                        "企业标准编号缺少年份",
+                        "补充年份，如 Q/ABC 001-2023",
+                        text[:100]
+                    )
+
+    def _check_group_standard_number(self) -> None:
+        """MS005: 团体标准编号格式检查"""
+        for para in self.paragraphs:
+            text = para["text"]
+            # T/XXXXXXXX-YYYY
+            # 检查是否缺少年份
+            m = re.search(r'T/([A-Z]+)\s*\d+', text)
+            if m:
+                # 检查是否有年份
+                if not re.search(r'T/[A-Z]+\s*\d+[-—:：]\d{4}', text):
+                    self._add_issue(
+                        "MS005",
+                        Severity.WARNING,
+                        f"段落 {para['index']}",
+                        "团体标准编号缺少年份",
+                        "补充年份，如 T/CAS 001-2023",
+                        text[:100]
+                    )
 
     # ===== 辅助方法 =====
 
@@ -1095,14 +1256,36 @@ class StandardChecker:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="GB/T 1.1-2020 标准草稿自动化检查工具（改进版）"
+        description="标准草稿自动化检查工具（多标准支持 v2.5）"
     )
-    parser.add_argument("input", help="输入文件路径（.docx 或 .pdf）")
+    parser.add_argument("input", nargs="?", help="输入文件路径（.docx 或 .pdf）")
     parser.add_argument("--output", "-o", help="输出 JSON 结果文件路径（可选）")
     parser.add_argument("--pretty", "-p", action="store_true", help="格式化输出 JSON")
     parser.add_argument("--analyze-styles", "-a", action="store_true", help="分析文档样式（仅 .docx）")
+    parser.add_argument(
+        "--standard", "-s",
+        help="指定标准类型（默认自动检测）。可选："
+             "gb-national(国家标准), gb-industry(行业标准), "
+             "gb-local(地方标准), gb-enterprise(企业标准), gb-group(团体标准)"
+    )
+    parser.add_argument(
+        "--list-standards", action="store_true",
+        help="列出所有支持的标准类型"
+    )
 
     args = parser.parse_args()
+
+    # --list-standards：列出标准类型
+    if args.list_standards:
+        print("支持的标准类型：\n")
+        for p in list_profiles():
+            print(f"  {p['id']:16s}  {p['name']}  ({p['number_example']})")
+            print(f"  {'':16s}  {p['description']}\n")
+        return
+
+    if not args.input:
+        parser.print_help()
+        sys.exit(1)
 
     # 检查输入文件
     input_path = Path(args.input)
@@ -1114,14 +1297,25 @@ def main():
     if file_ext not in (".docx", ".pdf"):
         print(f"错误：不支持的文件格式：{file_ext}（仅支持 .docx 和 .pdf）")
         sys.exit(1)
-    
+
+    # 验证 --standard 参数
+    if args.standard:
+        try:
+            get_profile(args.standard)
+        except ValueError as e:
+            print(f"错误：{e}")
+            sys.exit(1)
+
     # 执行检查
-    checker = StandardChecker()
+    checker = StandardChecker(standard=args.standard)
     issues = checker.check(str(input_path), analyze_styles=args.analyze_styles)
     
     # 输出结果
     result = {
         "file": str(input_path),
+        "standard_type": checker.profile.id if checker.profile else "gb-national",
+        "standard_name": checker.profile.name if checker.profile else "国家标准",
+        "drafting_standard": checker.profile.drafting_standard if checker.profile else "GB/T 1.1-2020",
         "total_issues": len(issues),
         "summary": {
             "ERROR": sum(1 for i in issues if i.severity == "ERROR"),
