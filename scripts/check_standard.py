@@ -526,7 +526,7 @@ class StandardChecker:
     def _check_references(self) -> None:
         """检查引用格式"""
         # 注日期引用格式（应为 GB/T XXXXX-YYYY，用一字线）
-        dated_ref_pattern = re.compile(r'GB/T\s*\d+[:：]\d{4}')
+        dated_ref_pattern = re.compile(r'GB/T\s*\d+\.?\d*[:：]\d{4}')
         # 页码引用
         page_ref_pattern = re.compile(r'第\s*\d+\s*页')
         
