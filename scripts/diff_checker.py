@@ -80,8 +80,9 @@ class StructuralChange:
 class DiffChecker:
     """版本对比检查器"""
 
-    def __init__(self):
+    def __init__(self, standard: str = None):
         self.old_checker = None
+        self._pending_standard = standard
         self.new_checker = None
         self.old_paragraphs: List[Dict] = []
         self.new_paragraphs: List[Dict] = []
@@ -97,12 +98,12 @@ class DiffChecker:
 
         # 1. 分别检查两个版本
         print(f"正在检查旧版本：{old_path}")
-        self.old_checker = StandardChecker()
+        self.old_checker = StandardChecker(standard=self._pending_standard)
         old_issues = self.old_checker.check(old_path)
         self.old_paragraphs = list(self.old_checker.paragraphs)
 
         print(f"正在检查新版本：{new_path}")
-        self.new_checker = StandardChecker()
+        self.new_checker = StandardChecker(standard=self._pending_standard)
         new_issues = self.new_checker.check(new_path)
         self.new_paragraphs = list(self.new_checker.paragraphs)
 
@@ -499,6 +500,11 @@ def main():
     parser.add_argument("--output", "-o", help="输出 JSON 结果文件路径（可选）")
     parser.add_argument("--pretty", "-p", action="store_true", help="格式化输出 JSON")
     parser.add_argument("--markdown", "-m", help="输出 Markdown 报告文件路径（可选）")
+    parser.add_argument(
+        "--standard", "-s",
+        help="指定标准类型（默认自动检测）：gb-national, gb-industry, "
+             "gb-local, gb-enterprise, gb-group"
+    )
 
     args = parser.parse_args()
 
@@ -513,7 +519,7 @@ def main():
             sys.exit(1)
 
     # 执行对比检查
-    checker = DiffChecker()
+    checker = DiffChecker(standard=args.standard)
     report = checker.check(args.old_file, args.new_file)
 
     # 输出 JSON
