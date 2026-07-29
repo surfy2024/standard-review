@@ -133,6 +133,8 @@ class StandardChecker:
         self.paragraphs: List[Dict] = []
         self.headings: List[Dict] = []
         self.style_analyzer = StyleAnalyzer()
+        self.doc = None
+        self.section_map: Dict[int, str] = {}
         
     def check(self, docx_path: str, analyze_styles: bool = False) -> List[Issue]:
         """执行检查"""
@@ -144,7 +146,8 @@ class StandardChecker:
             sys.exit(1)
         
         doc = Document(docx_path)
-        
+        self.doc = doc
+
         # 分析样式（可选）
         if analyze_styles:
             style_info = self.style_analyzer.analyze(doc)
@@ -163,43 +166,72 @@ class StandardChecker:
         self._check_figure_table_numbering()
         self._check_references()
         self._check_percentage_tolerance()
-        self._check_hyphen_consistency()  # 新增：连字符一致性检查
+        self._check_hyphen_consistency()  # 连字符一致性检查
+
+        # 新增规则检查
+        self._check_dimension_format()             # F003
+        self._check_formula_numbering()            # F011
+        self._check_isolated_clauses()             # S004
+        self._check_appendix_numbering()           # S006
+        self._check_introduction_normative()       # S009
+        self._check_summary_normative()            # T008
+        self._check_chinese_punctuation()          # W001
+        self._check_toc_numbering()                # F010
+        self._check_figure_table_footnotes()       # F012
+        self._check_dashed_paragraphs()            # S005
+        self._check_empty_sections()               # S007
+        self._check_comply_conform()               # T004
+        self._check_footnote_requirements()        # T007
+        self._check_term_definition_requirements() # T009
+        self._check_term_bold()                    # W003
         
         return self.issues
     
     def _extract_structure(self, doc) -> None:
         """提取文档结构"""
+        current_section = ""
         for i, para in enumerate(doc.paragraphs):
             text = para.text.strip()
             if not text:
                 continue
-            
+
             style_name = para.style.name if para.style else ""
-            
+
             # 智能识别标题
             is_heading = self._is_heading(text, style_name)
-            
+
+            # 更新当前章节
+            if is_heading:
+                current_section = self._get_section_name(text)
+
             item = {
                 "index": i,
                 "text": text,
                 "style": style_name,
-                "is_heading": is_heading
+                "is_heading": is_heading,
+                "section": current_section
             }
-            
+
             self.paragraphs.append(item)
-            
+            self.section_map[i] = current_section
+
             if is_heading:
                 self.headings.append(item)
     
     def _is_heading(self, text: str, style_name: str) -> bool:
         """智能判断是否为标题"""
-        
+
         # 1. 使用样式分析器的结果
         if style_name in self.style_analyzer.heading_styles:
             # 额外检查：长度和内容
             if len(text) <= 50 and not text.endswith('。'):
                 return True
-        
+
+        # 1b. 检查样式名称是否包含 Heading 或 标题（无需样式分析也能识别）
+        if style_name and ("Heading" in style_name or "标题" in style_name):
+            if "无标题" not in style_name and len(text) <= 50 and not text.endswith('。'):
+                return True
+
         # 2. 检查编号格式
         # 章编号：数字+空格+文字（如"1 范围"）
         if re.match(r'^\d+\s+\S', text):
@@ -208,12 +240,25 @@ class StandardChecker:
                 # 长度检查
                 if len(text) <= 50:
                     return True
-        
+
         # 条编号：数字.数字+空格+文字（如"5.1 总体要求"）
         if re.match(r'^\d+\.\d+\s+\S', text):
             if '\t' not in text and len(text) <= 50:
                 return True
-        
+
+        # 3. 检查已知非编号标题（前言、引言、目次等）
+        # 排除目次条目（含连续点号或省略号+页码）
+        if not re.search(r'\.{2,}|…', text):
+            known_headings = ["前言", "引言", "目次", "参考文献", "索引", "概述"]
+            for kh in known_headings:
+                if text == kh or text.startswith(kh):
+                    if len(text) <= 20 and not text.endswith('。'):
+                        return True
+
+        # 4. 检查附录标题
+        if re.match(r'^附录\s*[A-Z]', text) and len(text) <= 50:
+            return True
+
         return False
     
     def _add_issue(self, code: str, severity: Severity, location: str,
@@ -565,10 +610,466 @@ class StandardChecker:
                 "F009",
                 Severity.WARNING,
                 "整体",
-                f"标准引用中的连字符格式不一致：{len(half_width_refs)}处使用半角"-"，{len(full_width_refs)}处使用全角"—"",
-                "统一使用半角连字符"-"（推荐）或全角连字符"—"",
+                f'标准引用中的连字符格式不一致：{len(half_width_refs)}处使用半角"-"，{len(full_width_refs)}处使用全角"—"',
+                '统一使用半角连字符"-"（推荐）或全角连字符"—"',
                 context
             )
+
+    # ===== 辅助方法 =====
+
+    def _get_section_name(self, heading_text: str) -> str:
+        """从标题文本中提取章节名称"""
+        text = re.sub(r'^\d+(\.\d+)*\s+', '', heading_text)
+        text = text.strip()
+        if "前言" in text:
+            return "前言"
+        elif "引言" in text:
+            return "引言"
+        elif "范围" in text:
+            return "范围"
+        elif "规范性引用文件" in text or "引用文件" in text:
+            return "规范性引用文件"
+        elif "术语" in text and "定义" in text:
+            return "术语和定义"
+        elif "概述" in text:
+            return "概述"
+        elif "目次" in text:
+            return "目次"
+        elif re.match(r'^附录', text):
+            return "附录"
+        else:
+            return text
+
+    # ===== 简单难度规则 =====
+
+    def _check_dimension_format(self) -> None:
+        """F003: 检查尺寸表述不规范（如 80x25x50 mm → 80 mm x 25 mm x 50 mm）"""
+        units = r'(?:mm|cm|m|km|μm|um|nm)'
+        # 匹配 数字x数字(+x数字) 后面跟单位，且数字间无单位
+        pattern = re.compile(rf'(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*[x×]\s*(\d+(?:\.\d+)?))?\s*{units}')
+
+        for para in self.paragraphs:
+            text = para["text"]
+            for match in pattern.finditer(text):
+                full = match.group()
+                # 如果第一个数字和x之间有单位，说明是规范的（如 80 mm x 25 mm）
+                if re.match(rf'\d+(?:\.\d+)?\s*{units}\s*[x×]', full):
+                    continue
+                self._add_issue(
+                    "F003",
+                    Severity.WARNING,
+                    f"段落 {para['index']}",
+                    f"尺寸表述不规范：\"{full}\"",
+                    "每个量后须带单位，如 80 mm x 25 mm x 50 mm",
+                    text[:100]
+                )
+
+    def _check_formula_numbering(self) -> None:
+        """F011: 检查公式编号是否有括号（如 公式3 → 公式(3)）"""
+        # 匹配"公式"后直接跟数字（无括号）
+        pattern = re.compile(r'公式\s*(?!\()(\d+)')
+
+        for para in self.paragraphs:
+            text = para["text"]
+            for match in pattern.finditer(text):
+                self._add_issue(
+                    "F011",
+                    Severity.WARNING,
+                    f"段落 {para['index']}",
+                    f"公式编号无括号：\"公式{match.group(1)}\"",
+                    f"改为\"公式({match.group(1)})\"",
+                    text[:100]
+                )
+
+    def _check_isolated_clauses(self) -> None:
+        """S004: 检查孤立条编号（只有3.1无3.2）"""
+        clause_map: Dict[int, List[int]] = {}
+
+        clause_pattern = re.compile(r'^(\d+)\.(\d+)\s+')
+        for h in self.headings:
+            match = clause_pattern.match(h["text"])
+            if match:
+                chapter = int(match.group(1))
+                clause = int(match.group(2))
+                if chapter not in clause_map:
+                    clause_map[chapter] = []
+                if clause not in clause_map[chapter]:
+                    clause_map[chapter].append(clause)
+
+        for chapter, clauses in clause_map.items():
+            if len(clauses) == 1:
+                self._add_issue(
+                    "S004",
+                    Severity.WARNING,
+                    "整体",
+                    f"孤立条编号：只有{chapter}.1而无{chapter}.2",
+                    "改为在章下设段，或补充其他条",
+                    f"章{chapter}仅有条{chapter}.1"
+                )
+
+    def _check_appendix_numbering(self) -> None:
+        """S006: 检查附录编号是否使用了I或O"""
+        pattern = re.compile(r'附录\s*([A-Z])')
+
+        for para in self.paragraphs:
+            text = para["text"]
+            for match in pattern.finditer(text):
+                letter = match.group(1)
+                if letter in ('I', 'O'):
+                    self._add_issue(
+                        "S006",
+                        Severity.ERROR,
+                        f"段落 {para['index']}",
+                        f"附录编号使用了\"{letter}\"（易与数字混淆）",
+                        f"跳过字母{letter}，使用前一个或后一个字母",
+                        text[:100]
+                    )
+
+    def _check_introduction_normative(self) -> None:
+        """S009: 检查引言是否包含规范性条款（"应"）"""
+        intro_paras = [p for p in self.paragraphs
+                       if p.get("section") == "引言" and not p["is_heading"]]
+
+        for para in intro_paras:
+            text = para["text"]
+            if re.search(r'应[\u4e00-\u9fff]', text):
+                self._add_issue(
+                    "S009",
+                    Severity.ERROR,
+                    f"段落 {para['index']}",
+                    "引言包含规范性条款（出现\"应\"）",
+                    "将规范性内容移至正文，引言只能含资料性内容",
+                    text[:100]
+                )
+
+    def _check_summary_normative(self) -> None:
+        """T008: 检查"概述"章节是否含要求条款"""
+        summary_paras = [p for p in self.paragraphs
+                         if p.get("section") == "概述" and not p["is_heading"]]
+
+        for para in summary_paras:
+            text = para["text"]
+            if re.search(r'应[\u4e00-\u9fff]', text):
+                self._add_issue(
+                    "T008",
+                    Severity.ERROR,
+                    f"段落 {para['index']}",
+                    "\"概述\"章节含要求条款（出现\"应\"）",
+                    "\"概述\"只能含陈述型条款",
+                    text[:100]
+                )
+
+    def _check_chinese_punctuation(self) -> None:
+        """W001: 检查中文正文是否使用半角标点"""
+        half_to_full = {
+            ',': '，',
+            ':': '：',
+            ';': '；',
+        }
+
+        for para in self.paragraphs:
+            text = para["text"]
+            if not text or para["is_heading"]:
+                continue
+
+            for i, char in enumerate(text):
+                if char in half_to_full:
+                    prev_char = text[i - 1] if i > 0 else ''
+                    next_char = text[i + 1] if i + 1 < len(text) else ''
+
+                    # 前后字符至少有一个是中文，才判定为半角标点误用
+                    if ('\u4e00' <= prev_char <= '\u9fff' or
+                            '\u4e00' <= next_char <= '\u9fff'):
+                        # 排除引用格式中的半角冒号（如 GB/T 1.1:2020）
+                        if char == ':' and re.search(r'[A-Z]/[A-Z]\s*\d*$', text[:i]):
+                            continue
+                        self._add_issue(
+                            "W001",
+                            Severity.WARNING,
+                            f"段落 {para['index']}",
+                            f"中文正文使用半角标点\"{char}\"",
+                            f"改为全角标点\"{half_to_full[char]}\"",
+                            text[:100]
+                        )
+                        break  # 每段只报一次
+
+    def _check_toc_numbering(self) -> None:
+        """F010: 检查目次页码是否使用阿拉伯数字（应为罗马数字）"""
+        toc_paras = []
+        in_toc = False
+        for para in self.paragraphs:
+            text = para["text"]
+            if "目次" in text and len(text) <= 10:
+                in_toc = True
+                continue
+            if in_toc and para["is_heading"]:
+                break
+            if in_toc and text:
+                toc_paras.append(para)
+
+        # 匹配目次条目末尾的阿拉伯页码
+        page_pattern = re.compile(r'[.·…\s]+\s*(\d+)\s*$')
+
+        for para in toc_paras:
+            text = para["text"]
+            match = page_pattern.search(text)
+            if match:
+                self._add_issue(
+                    "F010",
+                    Severity.ERROR,
+                    f"段落 {para['index']}",
+                    f"目次页码使用阿拉伯数字\"{match.group(1)}\"",
+                    "目次页码应使用罗马数字（I、II、III...）",
+                    text[:100]
+                )
+
+    # ===== 中等难度规则 =====
+
+    def _check_figure_table_footnotes(self) -> None:
+        """F012: 检查图/表脚注编号格式（应为字母a/b/c，非数字）"""
+        # 匹配"图N"或"表N"附近的脚注使用数字编号
+        fig_footnote_pattern = re.compile(r'图\s*\d+.*?注\s*(\d+)')
+        tab_footnote_pattern = re.compile(r'表\s*\d+.*?注\s*(\d+)')
+
+        for para in self.paragraphs:
+            text = para["text"]
+            for pattern in [fig_footnote_pattern, tab_footnote_pattern]:
+                match = pattern.search(text)
+                if match:
+                    self._add_issue(
+                        "F012",
+                        Severity.ERROR,
+                        f"段落 {para['index']}",
+                        f"图/表脚注使用数字编号\"{match.group(1)}\"",
+                        "图/表脚注应使用字母编号：a、b、c...",
+                        text[:100]
+                    )
+
+    def _check_dashed_paragraphs(self) -> None:
+        """S005: 检查款/项无归属（破折号引导的款直接出现在章下）"""
+        dash_pattern = re.compile(r'^[—–-]+\s*')
+
+        for para in self.paragraphs:
+            text = para["text"]
+            if not dash_pattern.match(text):
+                continue
+
+            # 找到最近的标题
+            prev_heading = None
+            for h in reversed(self.headings):
+                if h["index"] <= para["index"]:
+                    prev_heading = h
+                    break
+
+            if prev_heading:
+                heading_text = prev_heading["text"]
+                # 如果上一个标题是章标题（数字+空格，无点号）
+                first_token = heading_text.split()[0] if heading_text.split() else ""
+                if re.match(r'^\d+$', first_token):
+                    self._add_issue(
+                        "S005",
+                        Severity.ERROR,
+                        f"段落 {para['index']}",
+                        "款直接出现在章下，无归属条",
+                        "将款移至某一条下",
+                        text[:100]
+                    )
+
+    def _check_empty_sections(self) -> None:
+        """S007: 检查无内容要素是否已声明"""
+        sections_to_check = [
+            ("规范性引用文件", "本文件没有规范性引用文件"),
+            ("术语和定义", "本文件中没有需要界定的术语和定义"),
+        ]
+
+        for section_name, declaration in sections_to_check:
+            section_paras = [p for p in self.paragraphs
+                             if p.get("section") == section_name]
+
+            if not section_paras:
+                self._add_issue(
+                    "S007",
+                    Severity.ERROR,
+                    "整体",
+                    f"缺少\"{section_name}\"要素（即使无内容也应列出标题并声明）",
+                    f"添加\"{section_name}\"标题，并写明\"{declaration}。\"",
+                )
+                continue
+
+            content_paras = [p for p in section_paras if not p["is_heading"]]
+            if not content_paras:
+                self._add_issue(
+                    "S007",
+                    Severity.ERROR,
+                    section_name,
+                    f"\"{section_name}\"部分只有标题无内容",
+                    f"写明\"{declaration}。\"或列出相关内容",
+                )
+                continue
+
+            all_text = " ".join(p["text"] for p in content_paras)
+            if declaration in all_text:
+                continue
+
+            # 检查是否有实际内容
+            if section_name == "规范性引用文件":
+                has_content = bool(
+                    re.search(r'GB[/／]T\s*\d+', all_text) or
+                    re.search(r'ISO\s*\d+', all_text) or
+                    re.search(r'IEC\s*\d+', all_text)
+                )
+            else:
+                has_content = any(
+                    "是指" in p["text"] or "定义" in p["text"]
+                    for p in content_paras if len(p["text"]) > 5
+                )
+
+            if not has_content:
+                self._add_issue(
+                    "S007",
+                    Severity.ERROR,
+                    section_name,
+                    f"\"{section_name}\"部分无内容且未声明",
+                    f"写明\"{declaration}。\"或列出相关内容",
+                )
+
+    def _check_comply_conform(self) -> None:
+        """T004: 检查"遵守"和"符合"混用"""
+        for para in self.paragraphs:
+            text = para["text"]
+
+            # "遵守...要求" → 应改为"符合...要求"
+            if re.search(r'遵守.*?要求', text):
+                self._add_issue(
+                    "T004",
+                    Severity.WARNING,
+                    f"段落 {para['index']}",
+                    "\"遵守\"与\"要求\"搭配不当",
+                    "改为\"符合...要求\"（产品/对象符合要求）",
+                    text[:100]
+                )
+
+            # "符合...规则/原则" → 应改为"遵守...规则/原则"
+            if re.search(r'符合.*?规则', text) or re.search(r'符合.*?原则', text):
+                self._add_issue(
+                    "T004",
+                    Severity.WARNING,
+                    f"段落 {para['index']}",
+                    "\"符合\"与\"规则/原则\"搭配不当",
+                    "改为\"遵守...规则/原则\"（人/组织遵守规则）",
+                    text[:100]
+                )
+
+    def _check_footnote_requirements(self) -> None:
+        """T007: 检查条文脚注是否含要求条款"""
+        if not self.doc:
+            return
+
+        try:
+            from lxml import etree
+            ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+
+            footnotes_part = None
+            for rel in self.doc.part.rels.values():
+                if 'footnotes' in rel.reltype:
+                    footnotes_part = rel.target_part
+                    break
+
+            if footnotes_part:
+                root = etree.fromstring(footnotes_part.blob)
+                for fn in root.findall('.//w:footnote', ns):
+                    fn_id = fn.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}id')
+                    if fn_id in ('-1', '0'):
+                        continue
+                    texts = fn.findall('.//w:t', ns)
+                    fn_text = ''.join(t.text or '' for t in texts)
+                    if fn_text and re.search(r'应[\u4e00-\u9fff]', fn_text):
+                        self._add_issue(
+                            "T007",
+                            Severity.ERROR,
+                            f"脚注 {fn_id}",
+                            "条文脚注含要求条款（出现\"应\"）",
+                            "条文脚注只能含陈述性内容",
+                            fn_text[:100]
+                        )
+        except Exception:
+            pass
+
+    def _check_term_definition_requirements(self) -> None:
+        """T009: 检查术语定义是否含要求型条款"""
+        term_paras = [p for p in self.paragraphs
+                      if p.get("section") == "术语和定义" and not p["is_heading"]]
+
+        for para in term_paras:
+            text = para["text"]
+            if ("是指" in text or "指" in text) and re.search(r'应[\u4e00-\u9fff]', text):
+                self._add_issue(
+                    "T009",
+                    Severity.ERROR,
+                    f"段落 {para['index']}",
+                    "术语定义含要求型条款（出现\"应\"）",
+                    "术语定义不应含要求型条款，改为陈述性表述",
+                    text[:100]
+                )
+
+    def _check_term_bold(self) -> None:
+        """W003: 检查术语首次出现是否加粗"""
+        if not self.doc:
+            return
+
+        term_section_started = False
+
+        for i, para in enumerate(self.doc.paragraphs):
+            text = para.text.strip()
+            if not text:
+                continue
+
+            # 检测进入术语和定义部分
+            if self._get_section_name(text) == "术语和定义":
+                term_section_started = True
+                continue
+
+            if not term_section_started:
+                continue
+
+            # 检测离开术语和定义部分
+            style_name = para.style.name if para.style else ""
+            if self._is_heading(text, style_name):
+                if self._get_section_name(text) != "术语和定义":
+                    break
+
+            # 检查是否是术语定义段落
+            if "是指" not in text and "指" not in text:
+                continue
+
+            term_end = text.find("是指") if "是指" in text else text.find("指")
+            if term_end <= 0:
+                continue
+
+            term_text = text[:term_end].strip()
+            if not term_text or len(term_text) > 30:
+                continue
+
+            # 检查术语部分的 runs 是否加粗
+            bold_found = False
+            char_count = 0
+            for run in para.runs:
+                run_text = run.text or ""
+                if char_count >= term_end:
+                    break
+                if run.bold:
+                    bold_found = True
+                char_count += len(run_text)
+
+            if not bold_found:
+                self._add_issue(
+                    "W003",
+                    Severity.SUGGESTION,
+                    f"段落 {i}",
+                    f"术语\"{term_text}\"首次出现未加粗",
+                    f"加粗术语\"{term_text}\"",
+                    text[:100]
+                )
 
 
 def main():
