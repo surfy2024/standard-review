@@ -30,6 +30,9 @@ from standard_profiles import (
     is_rule_enabled,
 )
 
+# 引用标准符合性检查
+from reference_checker import ReferenceChecker
+
 
 class Severity(Enum):
     ERROR = "ERROR"
@@ -152,8 +155,15 @@ class StandardChecker:
         self.profile: Optional[StandardProfile] = None
         self._pending_standard = standard  # 延迟到段落提取后再解析
         
-    def check(self, file_path: str, analyze_styles: bool = False) -> List[Issue]:
-        """执行检查（支持 .docx 和 .pdf 格式）"""
+    def check(self, file_path: str, analyze_styles: bool = False,
+              ref_files: List[str] = None) -> List[Issue]:
+        """执行检查（支持 .docx 和 .pdf 格式）
+
+        Args:
+            file_path: 输入文件路径
+            analyze_styles: 是否分析文档样式
+            ref_files: 引用标准文档路径列表（用于符合性检查，可选）
+        """
         input_path = Path(file_path)
         if not input_path.exists():
             print(f"错误：文件不存在：{input_path}")
@@ -236,6 +246,17 @@ class StandardChecker:
             method = getattr(self, check_name, None)
             if method:
                 method()
+
+        # 引用标准符合性检查
+        self.ref_checker = ReferenceChecker(
+            self.paragraphs, self.headings, self.section_map,
+            add_issue_func=self._add_issue
+        )
+        self.ref_checker.check_auto()
+
+        # 用户提交层：符合性检查（仅当提供了引用标准文档时）
+        if ref_files:
+            self.ref_checker.check_compliance(ref_files)
 
         return self.issues
     
@@ -1256,7 +1277,7 @@ class StandardChecker:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="标准草稿自动化检查工具（多标准支持 v2.5）"
+        description="标准草稿自动化检查工具（引用标准符合性检查 v2.6）"
     )
     parser.add_argument("input", nargs="?", help="输入文件路径（.docx 或 .pdf）")
     parser.add_argument("--output", "-o", help="输出 JSON 结果文件路径（可选）")
@@ -1271,6 +1292,14 @@ def main():
     parser.add_argument(
         "--list-standards", action="store_true",
         help="列出所有支持的标准类型"
+    )
+    parser.add_argument(
+        "--ref", action="append", default=[],
+        help="引用标准文档路径（用于符合性检查，可多次指定）。如 --ref GB-T1.1-2020.docx"
+    )
+    parser.add_argument(
+        "--ref-dir",
+        help="引用标准文档目录路径（自动加载目录下所有 .docx 和 .pdf 文件）"
     )
 
     args = parser.parse_args()
@@ -1308,7 +1337,22 @@ def main():
 
     # 执行检查
     checker = StandardChecker(standard=args.standard)
-    issues = checker.check(str(input_path), analyze_styles=args.analyze_styles)
+
+    # 收集引用标准文件
+    ref_files = list(args.ref) if args.ref else []
+    if args.ref_dir:
+        ref_dir = Path(args.ref_dir)
+        if not ref_dir.exists():
+            print(f"错误：引用标准目录不存在：{ref_dir}")
+            sys.exit(1)
+        for ext in ("*.docx", "*.pdf"):
+            for f in ref_dir.glob(ext):
+                ref_files.append(str(f))
+        if ref_files:
+            print(f"从 {ref_dir} 加载了 {len(ref_files)} 个引用标准文件")
+
+    issues = checker.check(str(input_path), analyze_styles=args.analyze_styles,
+                           ref_files=ref_files if ref_files else None)
     
     # 输出结果
     result = {
@@ -1324,6 +1368,10 @@ def main():
         },
         "issues": [asdict(i) for i in issues]
     }
+    
+    # 添加引用标准检查摘要
+    if hasattr(checker, 'ref_checker'):
+        result["reference_check"] = checker.ref_checker.get_summary()
     
     # 输出到文件或控制台
     if args.output:
