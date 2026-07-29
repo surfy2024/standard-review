@@ -8,7 +8,7 @@ GB/T 1.1-2020 标准草稿自动化检查脚本（改进版）
 3. 输出 JSON 格式的检查结果
 
 使用方法：
-    python check_standard.py <input.docx> [--output result.json] [--analyze-styles]
+    python check_standard.py <input.docx|input.pdf> [--output result.json] [--analyze-styles]
 """
 
 import re
@@ -136,24 +136,45 @@ class StandardChecker:
         self.doc = None
         self.section_map: Dict[int, str] = {}
         
-    def check(self, docx_path: str, analyze_styles: bool = False) -> List[Issue]:
-        """执行检查"""
-        try:
-            from docx import Document
-        except ImportError:
-            print("错误：需要安装 python-docx 库")
-            print("请运行：pip install python-docx")
+    def check(self, file_path: str, analyze_styles: bool = False) -> List[Issue]:
+        """执行检查（支持 .docx 和 .pdf 格式）"""
+        input_path = Path(file_path)
+        if not input_path.exists():
+            print(f"错误：文件不存在：{input_path}")
             sys.exit(1)
-        
-        doc = Document(docx_path)
-        self.doc = doc
 
-        # 分析样式（可选）
-        if analyze_styles:
-            style_info = self.style_analyzer.analyze(doc)
-            print("\n=== 文档样式分析 ===")
-            print(f"总样式数: {style_info['total_styles']}")
-            print(f"标题样式: {', '.join(style_info['heading_styles'])}")
+        file_ext = input_path.suffix.lower()
+
+        if file_ext == '.pdf':
+            # PDF 文件：使用 pdf_extractor
+            try:
+                from pdf_extractor import extract as extract_pdf
+            except ImportError:
+                print("错误：需要安装 PyMuPDF 库")
+                print("请运行：pip install PyMuPDF")
+                sys.exit(1)
+
+            doc = extract_pdf(str(input_path))
+            self.doc = doc
+            print(f"已加载 PDF 文件：{input_path}（{len(doc.paragraphs)} 个段落）")
+        else:
+            # DOCX 文件
+            try:
+                from docx import Document
+            except ImportError:
+                print("错误：需要安装 python-docx 库")
+                print("请运行：pip install python-docx")
+                sys.exit(1)
+
+            doc = Document(str(input_path))
+            self.doc = doc
+
+            # 分析样式（可选）
+            if analyze_styles:
+                style_info = self.style_analyzer.analyze(doc)
+                print("\n=== 文档样式分析 ===")
+                print(f"总样式数: {style_info['total_styles']}")
+                print(f"标题样式: {', '.join(style_info['heading_styles'])}")
         
         # 提取文档结构
         self._extract_structure(doc)
@@ -1076,21 +1097,23 @@ def main():
     parser = argparse.ArgumentParser(
         description="GB/T 1.1-2020 标准草稿自动化检查工具（改进版）"
     )
-    parser.add_argument("input", help="输入的 .docx 文件路径")
+    parser.add_argument("input", help="输入文件路径（.docx 或 .pdf）")
     parser.add_argument("--output", "-o", help="输出 JSON 结果文件路径（可选）")
     parser.add_argument("--pretty", "-p", action="store_true", help="格式化输出 JSON")
-    parser.add_argument("--analyze-styles", "-a", action="store_true", help="分析文档样式")
-    
+    parser.add_argument("--analyze-styles", "-a", action="store_true", help="分析文档样式（仅 .docx）")
+
     args = parser.parse_args()
-    
+
     # 检查输入文件
     input_path = Path(args.input)
     if not input_path.exists():
         print(f"错误：文件不存在：{input_path}")
         sys.exit(1)
-    
-    if input_path.suffix.lower() != ".docx":
-        print(f"警告：文件扩展名不是 .docx：{input_path}")
+
+    file_ext = input_path.suffix.lower()
+    if file_ext not in (".docx", ".pdf"):
+        print(f"错误：不支持的文件格式：{file_ext}（仅支持 .docx 和 .pdf）")
+        sys.exit(1)
     
     # 执行检查
     checker = StandardChecker()
