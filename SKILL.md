@@ -3,7 +3,7 @@ name: standard-review
 description: 基于 GB/T 1.1-2020 标准要求，审查标准草稿在格式编排、结构要素、规范性用词和文字表述四个维度的错误，并给出修改建议。适用于：(1) 审查国家标准、行业标准、地方标准或企业标准草案；(2) 检查标准文档是否符合 GB/T 1.1-2020 规定；(3) 用户说"审查标准"、"校审标准草稿"、"检查标准格式"、"标准文档审核"等请求时触发。
 ---
 
-# 标准草稿校审 Skill（v2.2 - HTML交互报告版）
+# 标准草稿校审 Skill（v2.3 - PDF格式支持版）
 
 ## 概述
 
@@ -14,6 +14,7 @@ description: 基于 GB/T 1.1-2020 标准要求，审查标准草稿在格式编�
 - ⚡ **脚本快速检查** - 快速识别格式、规则问题
 - 🔧 **自动修复** - 对确定性规则自动修复，生成带 Word Track Changes 标记的修订版
 - 📊 **HTML交互报告** - 可筛选、可搜索、可展开详情的交互式审查报告
+- 📄 **多格式支持** - 支持 .docx 和 .pdf 两种输入格式，检测结果完全一致
 - 🎯 **精准定位** - 准确识别问题位置和类型
 - 📋 **结构化报告** - 输出清晰的审查报告（Markdown + HTML 双格式）
 
@@ -21,7 +22,7 @@ description: 基于 GB/T 1.1-2020 标准要求，审查标准草稿在格式编�
 
 ### 第一步：接收文件并读取内容
 
-用户提供标准草稿文件（支持 .docx 格式）。
+用户提供标准草稿文件（支持 .docx 和 .pdf 格式）。
 
 **AI操作**：
 1. 使用 `read_file` 工具读取文档内容
@@ -33,7 +34,7 @@ description: 基于 GB/T 1.1-2020 标准要求，审查标准草稿在格式编�
 **执行自动化检查脚本**：
 
 ```bash
-python scripts/check_standard.py <input.docx> --output result.json --pretty
+python scripts/check_standard.py <input.docx|input.pdf> --output result.json --pretty
 ```
 
 **脚本检查内容**：
@@ -410,6 +411,22 @@ python scripts/generate_html_report.py result.json --output report.html
 - 建议结合实际情况判断是否修改
 
 ## 更新日志
+
+### v2.3（2026-07-29）
+
+**PDF 格式支持**（新增 pdf_extractor.py）：
+- ✅ 支持 .pdf 输入格式，与 .docx 使用相同的检查规则
+- ✅ PyMuPDF 文本块提取 + 字体大小聚类分析识别标题层级
+- ✅ 模拟 python-docx 接口（PDFDocument/PDFParagraph/PDFRun），无需修改检查逻辑
+- ✅ 段落合并：自动合并跨块的同段落文本
+- ✅ 标题识别：字体大小 + 编号格式 + 粗体 + 已知标题词四重判断
+- ✅ W003 术语加粗检查支持 PDF（通过 span 级别 bold 标志）
+- ✅ PDF 和 DOCX 检测结果完全一致（测试验证）
+- ✅ 新增测试脚本（test_pdf.py），15 项验证全部通过
+
+**已知限制**（PDF 格式）：
+- T007 条文脚注检查不适用（PDF 无 Word 脚注 XML 结构）
+- 自动修复（auto_fix.py）仅支持 .docx（PDF 无法生成 Track Changes）
 
 ### v2.2（2026-07-29）
 
