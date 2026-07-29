@@ -5,274 +5,415 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.7+-green.svg)](https://www.python.org/)
 [![GB/T 1.1-2020](https://img.shields.io/badge/GB%2FT%201.1-2020-orange.svg)](https://std.samr.gov.cn/)
+[![Version](https://img.shields.io/badge/version-2.6-purple.svg)](https://github.com/surfy2024/standard-review/releases)
 [![AI Enhanced](https://img.shields.io/badge/AI-Enhanced-blue.svg)](https://github.com/surfy2024/standard-review)
 
-## ✨ 特性
+---
 
-### AI深度审查能力 🤖
+## ✨ 核心特性
 
-- 🧠 **语义理解** - AI理解内容语义，判断条款类型、表述准确性
-- 🧠 **上下文分析** - AI分析内容在特定语境中的合理性
-- 🧠 **灵活判断** - AI处理边界情况、特殊情况
-- 🧠 **专业建议** - AI提供基于标准的修改建议
+| 能力 | 说明 |
+|------|------|
+| 🤖 **AI 深度审查** | 语义理解、上下文分析、灵活判断、专业建议 |
+| ⚡ **40+ 检查规则** | 格式编排 / 结构要素 / 规范性用词 / 文字表述四大类 |
+| 🔧 **自动修复** | 7 类规则自动修复，生成 Word Track Changes 修订版 |
+| 📊 **HTML 交互报告** | 可筛选、可搜索、可展开详情的交互式报告 |
+| 📄 **多格式支持** | 同时支持 .docx 和 .pdf 输入，检测结果完全一致 |
+| 🔄 **版本对比** | 新旧版本草稿 diff，区分新增/已修复/持续存在问题 |
+| 📚 **多标准支持** | 国家/行业/地方/企业/团体 5 类标准，自动检测 + 差异化规则 |
+| 🔗 **引用标准符合性检查** | 引用提取、交叉一致性、用户提交标准文档后指标级符合性比对 |
 
-### 脚本快速检查 ⚡
-
-- ✅ **智能样式分析** - 自动识别文档的样式体系
-- ✅ **准确标题识别** - 区分真正的标题和正文内容
-- ✅ **格式规则检查** - 编号连续性、数字单位间距、连字符一致性等
-- ✅ **低误报率** - 优化识别算法，准确率 95%+
-
-### 综合审查报告 📊
-
-- ✅ **四维度审查** - 格式编排、结构要素、规范性用词、文字表述
-- ✅ **问题来源标注** - 明确标注脚本发现或AI发现
-- ✅ **结构化输出** - JSON 格式 + Markdown 报告
+---
 
 ## 📦 安装
 
 ### 前置要求
 
 - Python 3.7+
-- python-docx 库
-
-### 安装依赖
+- python-docx（.docx 文档处理）
+- PyMuPDF（.pdf 文档处理，可选）
 
 ```bash
-pip install -r requirements.txt
+pip install python-docx PyMuPDF
 ```
+
+---
 
 ## 🚀 快速开始
 
-### 1. 基本审查
-
-```python
-from docx import Document
-from scripts.check_standard import StandardChecker
-
-# 加载文档
-doc = Document("your_standard.docx")
-
-# 执行审查
-checker = StandardChecker()
-issues = checker.check("your_standard.docx")
-
-# 输出结果
-for issue in issues:
-    print(f"[{issue.severity}] {issue.description}")
-```
-
-### 2. 样式分析
+### 基本审查
 
 ```bash
-python scripts/analyze_styles.py your_standard.docx
-```
-
-### 3. 命令行使用
-
-```bash
-# 基本审查
-python scripts/check_standard.py your_standard.docx
-
-# 输出到文件
+# 审查 DOCX 文件
 python scripts/check_standard.py your_standard.docx --output result.json --pretty
 
-# 样式分析
-python scripts/check_standard.py your_standard.docx --analyze-styles
+# 审查 PDF 文件
+python scripts/check_standard.py your_standard.pdf --output result.json --pretty
 ```
+
+### 自动修复
+
+```bash
+# 生成带 Track Changes 标记的修订版
+python scripts/auto_fix.py your_standard.docx --output revised.docx
+```
+
+### HTML 交互报告
+
+```bash
+# 从 JSON 结果生成 HTML 报告
+python scripts/generate_html_report.py result.json --output report.html
+```
+
+### 版本对比
+
+```bash
+# 新旧版本对比审查
+python scripts/diff_checker.py old_version.docx new_version.docx \
+  --output diff_result.json --pretty --markdown diff_report.md
+```
+
+### 指定标准类型
+
+```bash
+# 自动检测标准类型（默认）
+python scripts/check_standard.py input.docx
+
+# 手动指定团体标准
+python scripts/check_standard.py input.docx --standard gb-group
+
+# 列出所有支持的标准类型
+python scripts/check_standard.py --list-standards
+```
+
+### 引用标准符合性检查
+
+```bash
+# 基础检查（自动层，零额外输入）
+python scripts/check_standard.py input.docx
+
+# 符合性检查（提交引用标准文档）
+python scripts/check_standard.py input.docx \
+  --ref GB-T1.1-2020.docx --ref GB-T7714-2015.pdf
+
+# 或指定引用标准目录
+python scripts/check_standard.py input.docx --ref-dir ./references/
+```
+
+---
+
+## 📋 功能详解
+
+### 1. 脚本快速检查（40+ 规则）
+
+#### 格式编排检查
+
+| 规则代码 | 检查内容 |
+|---------|---------|
+| F001 | 标题末尾标点检查 |
+| F002 | 数字与单位间距 |
+| F003 | 尺寸表述规范性（80x25x50 mm → 80 mm x 25 mm x 50 mm） |
+| F005-F007 | 层次编号连续性（章/条编号） |
+| F009 | 图表编号连续性 |
+| F010 | 目次页码罗马数字检查 |
+| F011 | 公式编号括号检查 |
+| F012 | 图/表脚注编号格式检查 |
+| F013 | 百分率公差格式 |
+| F014 | 连字符一致性（半角/全角混用） |
+
+#### 结构要素检查
+
+| 规则代码 | 检查内容 |
+|---------|---------|
+| S001 | 必备要素存在性（前言、范围） |
+| S002 | 要素排列顺序 |
+| S003 | 前言必备内容 |
+| S004 | 孤立条编号检查 |
+| S005 | 款/项无归属检查 |
+| S006 | 附录编号 I/O 检查 |
+| S007 | 无内容要素声明检查 |
+| S009 | 引言规范性条款检查 |
+
+#### 规范性用词检查
+
+| 规则代码 | 检查内容 |
+|---------|---------|
+| T001 | 禁用词检测（必须、应当、不得） |
+| T002 | "应"与弱化词搭配 |
+| T003 | 引用格式（注日期引用） |
+| T004 | "遵守"/"符合"混用检查 |
+| T006 | 注日期引用冒号→一字线 |
+| T007 | 条文脚注含要求条款检查 |
+| T008 | "概述"含要求条款检查 |
+| T009 | 术语定义含要求型条款检查 |
+
+#### 文字表述检查
+
+| 规则代码 | 检查内容 |
+|---------|---------|
+| W001 | 中文正文半角标点检查 |
+| W003 | 术语首次出现加粗检查 |
+
+#### 多标准专属检查
+
+| 规则代码 | 检查内容 |
+|---------|---------|
+| MS001 | 国家标准编号冒号→一字线 |
+| MS002 | 行业标准前缀代号校验（60+ 行业代号） |
+| MS003 | 地方标准区域代码校验（34 个省级行政区划） |
+| MS004 | 企业标准编号年份缺失检查 |
+| MS005 | 团体标准编号年份缺失检查 |
+
+#### 引用标准符合性检查
+
+**自动层（始终运行）：**
+
+| 规则代码 | 检查内容 |
+|---------|---------|
+| R001 | 从"规范性引用文件"提取所有引用标准编号 |
+| R002 | 引用格式校验（编号空格、连接符、全角/半角） |
+| R003 | 重复引用检测 |
+| R004 | 排序规范性检查（国标→行标→地标→国际标准） |
+| R005 | 引导语完整性和存在性检查 |
+| R006 | 全文标准引用提取 |
+| R007 | 缺失引用检测（正文引用但未在引用文件中列出） |
+| R008 | 冗余引用检测（引用文件中列出但正文未引用） |
+
+**用户提交层（需 `--ref` 提供引用标准文档）：**
+
+| 规则代码 | 检查内容 |
+|---------|---------|
+| R009 | 从引用标准文档提取要求性条款（应/必须/不得/宜/可） |
+| R010 | 从草稿提取对应要求性条款 |
+| R011 | 语义匹配——关键词 Jaccard 相似度关联 |
+| R012 | 指标级比对——不符合 / 符合 / 优于 |
+
+---
+
+### 2. 自动修复（Track Changes）
+
+对确定性规则自动修复，生成带 Word Track Changes 标记的修订版，用户可在 Word 中逐条接受/拒绝：
+
+| 规则 | 修复内容 |
+|------|---------|
+| T001 | 禁用能愿动词替换（必须→应, 应当→应, 不得→不应） |
+| W001 | 半角标点→全角标点（,→， :→： ;→；） |
+| F002 | 数字与单位间补空格（80mm→80 mm） |
+| F003 | 尺寸表述规范化（80x25x50 mm→80 mm x 25 mm x 50 mm） |
+| F011 | 公式编号补括号（公式3→公式(3)） |
+| F001 | 删除标题末尾标点 |
+| T006 | 注日期引用冒号→一字线（GB/T XXXXX:YYYY→GB/T XXXXX-YYYY） |
+
+---
+
+### 3. HTML 交互报告
+
+自包含 HTML 报告（内联 CSS + JS，无外部依赖）：
+
+- 📊 统计概览卡片（ERROR / WARNING / SUGGESTION 三级分类）
+- 🏷️ 高频问题类型 TOP 10
+- 🔍 多维筛选（按严重等级 + 按规则分类）
+- 🔎 全文搜索（实时搜索问题描述、位置、建议）
+- 📎 上下文展开（点击展开问题原文上下文）
+- 🔧 可修复标记（自动标注可自动修复的问题）
+- 📱 响应式设计（适配桌面和移动端）
+
+---
+
+### 4. 多标准支持
+
+支持五种中国标准类型，自动从文档内容检测标准编号前缀：
+
+| 标准类型 | ID | 编号示例 | 差异说明 |
+|---------|-----|---------|---------|
+| 国家标准 | `gb-national` | GB/T 12345-2020 | 全部 GB/T 1.1-2020 规则 |
+| 行业标准 | `gb-industry` | YY 0123-2020 | 全部规则 + 行业代号校验 |
+| 地方标准 | `gb-local` | DB11/T 1322-2023 | 全部规则 + 区域代码校验 |
+| 企业标准 | `gb-enterprise` | Q/ABC 001-2023 | 前言非强制，S007 禁用 |
+| 团体标准 | `gb-group` | T/CAS 001-2023 | S007 禁用 |
+
+---
+
+### 5. 版本对比 diff
+
+```bash
+python scripts/diff_checker.py old.docx new.docx --output diff.json --markdown report.md
+```
+
+- 🔄 段落级 diff（difflib.SequenceMatcher）
+- 🏗️ 结构变更检测（标题增删改、章节变化）
+- 📋 问题三分类：新增问题 / 已修复问题 / 持续存在问题
+- 📄 双格式报告：JSON + Markdown
+
+---
+
+### 6. 引用标准符合性检查
+
+不内置庞大标准数据库，改为**用户按需提交模式**：
+
+**指标比对逻辑：**
+- 草稿要求 ≥ 引用标准要求 → **优于**（草稿更严格，合规）
+- 草稿要求 = 引用标准要求 → **符合**
+- 草稿要求 < 引用标准要求 → **不符合**（草稿低于现行标准，违规）
+
+---
 
 ## 📖 使用示例
 
-### 示例 1：审查国家标准草稿
+### Python API 调用
 
-```bash
-python scripts/check_standard.py national_standard.docx --output review_result.json --pretty
+```python
+from scripts.check_standard import StandardChecker
+
+# 创建检查器（自动检测标准类型）
+checker = StandardChecker()
+issues = checker.check("your_standard.docx")
+
+# 指定标准类型
+checker = StandardChecker(standard="gb-group")
+issues = checker.check("your_standard.docx")
+
+# 引用标准符合性检查
+issues = checker.check("your_standard.docx", ref_files=["GB-T1.1-2020.docx"])
+
+# 输出结果
+for issue in issues:
+    print(f"[{issue.severity}] {issue.code} {issue.description}")
 ```
 
-**输出示例**：
+### 输出示例
+
 ```json
 {
   "file": "national_standard.docx",
+  "standard_type": "gb-national",
+  "standard_name": "国家标准",
+  "drafting_standard": "GB/T 1.1-2020",
   "total_issues": 17,
   "summary": {
     "ERROR": 8,
     "WARNING": 9,
     "SUGGESTION": 0
   },
-  "issues": [
-    {
-      "code": "S001",
-      "severity": "ERROR",
-      "location": "整体",
-      "description": "缺少必备要素\"前言\"",
-      "suggestion": "补充\"前言\"要素"
-    }
-  ]
+  "issues": [...]
 }
 ```
 
-### 示例 2：分析文档样式
+---
 
-```bash
-python scripts/analyze_styles.py your_standard.docx
-```
-
-**输出示例**：
-```
-文档样式分析报告
-============================================================
-文件：your_standard.docx
-
-总样式数：15
-总段落数：1344
-
-识别的标题样式：
-- 章标题 (20 次)
-- 一级条标题 (45 次)
-```
-
-## 📋 审查范围
-
-### 格式编排审查
-- ✅ 层次编号连续性（章/条编号）
-- ✅ 标题格式（居中/顶格、末尾标点）
-- ✅ 图表编号与标题位置
-- ✅ 数字与单位间距
-- ✅ 百分率与尺寸表述
-- ✅ 公式编号格式
-- ✅ 脚注编号格式
-
-### 结构要素审查
-- ✅ 必备要素完整性（封面、前言、范围、核心技术要素）
-- ✅ 要素排列顺序
-- ✅ 前言必备内容（归口单位、起草单位、主要起草人等）
-- ✅ 无内容要素的声明规范
-- ✅ 附录编号规则
-
-### 规范性用词审查
-- ✅ 能愿动词使用（应/宜/可/能）
-- ✅ 禁用词检测（必须、应当、不得等）
-- ✅ "应"与弱化词/限定词的搭配错误
-- ✅ "遵守"与"符合"的区分
-- ✅ 引用格式（注日期/不注日期引用）
-- ✅ 条款类型表述
-
-### 文字表述审查
-- ✅ 标点符号用法
-- ✅ 术语首次出现加粗
-- ✅ 缩略语首次出现标注全称
-- ✅ 法定计量单位使用
-- ✅ 量与单位符号规范
-
-## 📚 文档
-
-- [使用指南](docs/usage-guide.md) - 详细的使用说明和常见问题
-- [规则文件](references/) - GB/T 1.1-2020 审查规则
-- [示例文档](examples/) - 示例标准草稿和审查结果
-
-## 🛠️ 开发
-
-### 项目结构
+## 🛠️ 项目结构
 
 ```
 standard-review/
-├── README.md                   # 项目说明
-├── LICENSE                     # 许可证
-├── requirements.txt            # Python 依赖
-├── setup.py                    # 安装配置
-├── .gitignore                  # Git 忽略文件
-├── scripts/                    # 核心脚本
-│   ├── check_standard.py       # 主检查脚本
-│   └── analyze_styles.py       # 样式分析脚本
-├── references/                 # 规则文件
-│   ├── structure-rules.md      # 结构规则
-│   ├── format-rules.md         # 格式规则
-│   ├── terminology-rules.md    # 用词规则
-│   ├── common-errors.md        # 常见错误
-│   └── usage-guide.md          # 使用指南
-├── examples/                   # 示例文件
-│   ├── sample_standard.docx    # 示例标准
-│   └── review_result.json      # 审查结果
-└── docs/                       # 文档
-    ├── usage-guide.md          # 使用指南
-    └── CHANGELOG.md            # 更新日志
+├── README.md                       # 项目说明
+├── LICENSE                         # 许可证
+├── SKILL.md                        # Skill 配置文档
+├── references/                     # 规则参考文件
+│   ├── structure-rules.md
+│   ├── format-rules.md
+│   ├── terminology-rules.md
+│   ├── common-errors.md
+│   └── usage-guide.md
+└── scripts/                        # 核心脚本
+    ├── check_standard.py           # 主检查器（40+ 规则）
+    ├── auto_fix.py                 # 自动修复（Track Changes）
+    ├── generate_html_report.py     # HTML 交互报告生成
+    ├── pdf_extractor.py            # PDF 文本提取（PyMuPDF）
+    ├── diff_checker.py             # 版本对比 diff
+    ├── standard_profiles.py        # 多标准配置（5 类标准）
+    ├── reference_checker.py        # 引用标准符合性检查
+    ├── analyze_styles.py           # 文档样式分析
+    ├── test_rules.py               # 规则测试（14 项）
+    ├── test_autofix.py             # 自动修复测试（15 项）
+    ├── test_html_report.py         # HTML 报告测试（7 项）
+    ├── test_pdf.py                 # PDF 提取测试（15 项）
+    ├── test_diff.py                # 版本对比测试（33 项）
+    ├── test_multi_standard.py      # 多标准测试（106 项）
+    └── test_reference_check.py     # 引用标准检查测试（54 项）
 ```
 
-### 运行测试
+---
+
+## 🧪 测试
 
 ```bash
-python -m pytest tests/
+# 运行全部测试
+cd scripts
+python test_rules.py            # 规则测试
+python test_autofix.py          # 自动修复测试
+python test_html_report.py      # HTML 报告测试
+python test_pdf.py              # PDF 提取测试
+python test_diff.py             # 版本对比测试
+python test_multi_standard.py   # 多标准测试
+python test_reference_check.py  # 引用标准检查测试
 ```
 
-## 🤝 贡献
+共 7 套测试脚本，254+ 测试用例，全部通过。
 
-欢迎贡献！请查看 [贡献指南](CONTRIBUTING.md) 了解详情。
-
-### 贡献方式
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
+---
 
 ## 📝 更新日志
 
-### v1.2 (2026-07-14) - AI增强版 🤖
+### v2.6（2026-07-29）— 引用标准符合性检查
 
-**重大更新**：
-- 🧠 引入AI深度审查能力
-- 🧠 采用脚本+AI混合审查方案
-- 🧠 新增语义理解、上下文分析功能
+新增 `reference_checker.py`，实现两层架构：
+- **自动层 R001-R008**：引用标准提取、格式校验、重复检测、排序检查、交叉引用一致性（缺失引用 + 冗余引用）
+- **用户提交层 R009-R012**：从用户提供的引用标准文档提取要求性条款，语义匹配，指标级比对（不符合/符合/优于）
+- CLI 新增 `--ref` 和 `--ref-dir` 参数
 
-**AI审查内容**：
-- ✅ 前言内容完整性审查
-- ✅ 范围描述准确性审查
-- ✅ 条款类型判断
-- ✅ 术语和定义审查
-- ✅ 规范性引用审查
-- ✅ 内容一致性审查
+### v2.5（2026-07-29）— 多标准支持
 
-**脚本检查增强**：
-- ✅ 连字符一致性检查（检测半角/全角混用）
-- ✅ 标题空格检查（识别装饰性空格）
+新增 `standard_profiles.py`，支持国家/行业/地方/企业/团体 5 类标准，自动检测 + 差异化规则 + MS001-MS005 专属检查。
 
-**改进**：
-- ✅ 改进前言识别逻辑（支持包含空格的标题）
-- ✅ 优化必备要素检查（减少误报）
-- ✅ 增强审查报告格式（标注问题来源）
+### v2.4（2026-07-29）— 版本对比
 
-**新增文档**：
-- ✅ AI深度审查指南
+新增 `diff_checker.py`，段落级 diff 对齐，问题三分类（新增/已修复/持续存在），双格式报告。
 
-### v1.1 (2026-07-14)
+### v2.3（2026-07-29）— PDF 支持
 
-**新增功能**：
-- ✅ 样式分析功能
-- ✅ 智能标题识别算法
-- ✅ 上下文信息输出
-- ✅ 使用指南文档
+新增 `pdf_extractor.py`，PyMuPDF 文本提取 + 字体聚类识别标题，模拟 python-docx 接口，PDF/DOCX 检测结果完全一致。
 
-**改进**：
-- ✅ 优化标题识别逻辑，误报率降低 97%
-- ✅ 区分"无标题条"等特殊样式
-- ✅ 改进错误提示信息
+### v2.2（2026-07-29）— HTML 交互报告
 
-详见 [CHANGELOG.md](docs/CHANGELOG.md)
+新增 `generate_html_report.py`，自包含 HTML 报告，统计卡片 + TOP10 + 多维筛选 + 全文搜索 + 上下文展开。
+
+### v2.1（2026-07-29）— 自动修复
+
+新增 `auto_fix.py`，7 类规则自动修复，Word Track Changes 标记，run 级别精确操作。
+
+### v2.0（2026-07-29）— 规则补全
+
+新增 15 条检查规则（F003/F010-F012/S004-S007/S009/T004/T007-T009/W001/W003），脚本覆盖率从 19% 提升至 81%。
+
+### v1.2（2026-07-14）— AI 增强版
+
+引入 AI 深度审查能力，脚本 + AI 混合审查方案。
+
+### v1.1（2026-07-14）
+
+样式分析功能，智能标题识别算法。
+
+### v1.0（初始版本）
+
+基本格式编排、结构要素、规范性用词、文字表述检查。
+
+---
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+MIT License — 详见 [LICENSE](LICENSE) 文件
 
 ## 🙏 致谢
 
 - GB/T 1.1-2020《标准化工作导则 第1部分：标准化文件的结构和起草规则》
-- python-docx 库
+- [python-docx](https://github.com/python-docx/python-docx)
+- [PyMuPDF](https://github.com/pymupdf/PyMuPDF)
 
 ## 📧 联系方式
 
 - 项目地址：https://github.com/surfy2024/standard-review
 - 问题反馈：https://github.com/surfy2024/standard-review/issues
+- Releases：https://github.com/surfy2024/standard-review/releases
 
 ---
 
