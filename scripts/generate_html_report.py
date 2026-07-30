@@ -63,6 +63,11 @@ def escape_html(text: str) -> str:
     )
 
 
+def escape_html_nl(text: str) -> str:
+    """转义 HTML 特殊字符，并将换行转为 <br>"""
+    return escape_html(text).replace("\n", "<br>")
+
+
 def get_category(code: str) -> Dict[str, str]:
     """从问题编号获取分类信息"""
     prefix = code[0].upper() if code else "F"
@@ -110,11 +115,15 @@ def build_issue_rows(issues: List[Dict]) -> str:
         cat = get_category(code)
 
         # 上下文展开区域
+        # R012（符合性比对）的上下文默认展开，方便查看对比内容
+        auto_expand = (code == "R012")
+        detail_display = "block" if auto_expand else "none"
         context_html = ""
         if context:
+            detail_label = "条款对比：" if code == "R012" else "上下文："
             context_html = (
-                '<div class="issue-detail" id="detail-' + str(i) + '" style="display:none;">'
-                '<div class="detail-label">上下文：</div>'
+                '<div class="issue-detail" id="detail-' + str(i) + '" style="display:' + detail_display + ';">'
+                '<div class="detail-label">' + detail_label + '</div>'
                 '<pre class="detail-context">' + escape_html(context) + '</pre>'
                 '</div>'
             )
@@ -127,7 +136,8 @@ def build_issue_rows(issues: List[Dict]) -> str:
         # 展开按钮
         toggle_btn = ""
         if context:
-            toggle_btn = '<button class="btn-toggle" onclick="toggleDetail(' + str(i) + ')" title="展开上下文">&#9654;</button>'
+            btn_icon = "&#9660;" if auto_expand else "&#9654;"
+            toggle_btn = '<button class="btn-toggle" onclick="toggleDetail(' + str(i) + ')" title="展开/收起">' + btn_icon + '</button>'
 
         row = (
             '<tr class="issue-row" data-severity="' + severity + '" '
@@ -147,7 +157,7 @@ def build_issue_rows(issues: List[Dict]) -> str:
             '<td class="col-desc">'
             + escape_html(description) + toggle_btn +
             '</td>'
-            '<td class="col-suggestion">' + escape_html(suggestion) + '</td>'
+            '<td class="col-suggestion">' + escape_html_nl(suggestion) + '</td>'
             '</tr>'
             + context_html
         )
