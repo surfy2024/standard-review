@@ -314,6 +314,7 @@ class ReferenceChecker:
         self.draft_requirements: List[RequirementClause] = []
         self.ref_requirements: List[RequirementClause] = []
         self.compliance_results: List[ComplianceResult] = []
+        self.matched_pairs_count: int = 0  # R011 匹配到的要求对数
     
     # ============================================================
     # 自动层 R001-R008
@@ -330,6 +331,14 @@ class ReferenceChecker:
         self._extract_citations()         # R006
         self._check_missing_refs()        # R007
         self._check_redundant_refs()      # R008
+
+    def get_reference_numbers(self) -> List[str]:
+        """获取引用标准号列表（供自动下载使用）
+
+        Returns:
+            标准号列表，如 ['GB/T 1.1-2020', 'GB 3836.1-2021', ...]
+        """
+        return [ref.number for ref in self.references if ref.number]
     
     def _extract_reference_section(self) -> None:
         """提取"规范性引用文件"章节的段落"""
@@ -693,6 +702,7 @@ class ReferenceChecker:
         
         # R011: 语义匹配
         matched_pairs = self._match_requirements()
+        self.matched_pairs_count = len(matched_pairs)
         print(f"匹配到 {len(matched_pairs)} 对相关要求")
         
         # R012: 指标级比对
@@ -943,7 +953,7 @@ class ReferenceChecker:
             "total_citations": len(self.citations),
             "draft_requirements": len(self.draft_requirements),
             "ref_requirements": len(self.ref_requirements),
-            "matched_pairs": len(self.compliance_results),
+            "matched_pairs": self.matched_pairs_count,
             "references_detail": [
                 {
                     "number": r.number,
