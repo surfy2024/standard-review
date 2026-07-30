@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.7+-green.svg)](https://www.python.org/)
 [![GB/T 1.1-2020](https://img.shields.io/badge/GB%2FT%201.1-2020-orange.svg)](https://std.samr.gov.cn/)
-[![Version](https://img.shields.io/badge/version-2.6-purple.svg)](https://github.com/surfy2024/standard-review/releases)
+[![Version](https://img.shields.io/badge/version-2.7-purple.svg)](https://github.com/surfy2024/standard-review/releases)
 [![AI Enhanced](https://img.shields.io/badge/AI-Enhanced-blue.svg)](https://github.com/surfy2024/standard-review)
 
 ---
@@ -21,7 +21,7 @@
 | 📄 **多格式支持** | 同时支持 .docx 和 .pdf 输入，检测结果完全一致 |
 | 🔄 **版本对比** | 新旧版本草稿 diff，区分新增/已修复/持续存在问题 |
 | 📚 **多标准支持** | 国家/行业/地方/企业/团体 5 类标准，自动检测 + 差异化规则 |
-| 🔗 **引用标准符合性检查** | 引用提取、交叉一致性、用户提交标准文档后指标级符合性比对 |
+| 🔗 **引用标准符合性检查** | 引用提取、交叉一致性、**自动下载国标 PDF**、指标级符合性比对 |
 
 ---
 
@@ -89,12 +89,15 @@ python scripts/check_standard.py --list-standards
 ### 引用标准符合性检查
 
 ```bash
-# 基础检查（自动层，零额外输入）
+# 基础检查 + 自动下载引用标准（默认行为，零额外输入）
 python scripts/check_standard.py input.docx
 
-# 符合性检查（提交引用标准文档）
+# 禁用自动下载（仅运行自动层 R001-R008）
+python scripts/check_standard.py input.docx --no-auto-ref
+
+# 自动下载 + 手动补充非国标引用标准
 python scripts/check_standard.py input.docx \
-  --ref GB-T1.1-2020.docx --ref GB-T7714-2015.pdf
+  --ref SY-T-6276.pdf --ref HJ-169.docx
 
 # 或指定引用标准目录
 python scripts/check_standard.py input.docx --ref-dir ./references/
@@ -179,7 +182,7 @@ python scripts/check_standard.py input.docx --ref-dir ./references/
 | R007 | 缺失引用检测（正文引用但未在引用文件中列出） |
 | R008 | 冗余引用检测（引用文件中列出但正文未引用） |
 
-**用户提交层（需 `--ref` 提供引用标准文档）：**
+**用户提交层（自动下载国标 PDF 或 `--ref` 提供非国标文档）：**
 
 | 规则代码 | 检查内容 |
 |---------|---------|
@@ -249,7 +252,16 @@ python scripts/diff_checker.py old.docx new.docx --output diff.json --markdown r
 
 ### 6. 引用标准符合性检查
 
-不内置庞大标准数据库，改为**用户按需提交模式**：
+**自动下载 + 用户提交混合模式**：
+- **国标（GB/GB-T/GB-Z）**：自动从 [openstd.samr.gov.cn](https://openstd.samr.gov.cn/) 搜索并下载 PDF，无需用户干预
+- **非国标（行业标准等）**：用户通过 `--ref` 手动提交
+
+**自动下载流程**：
+1. 从草稿"规范性引用文件"章节提取引用标准清单
+2. 筛选可下载的国标类型
+3. 搜索 openstd.samr.gov.cn → 获取标准唯一标识 hcno
+4. 三步下载：详情页建立会话 → 激活下载权限 → 下载 PDF
+5. 下载的 PDF 自动传入 R009-R012 符合性检查
 
 **指标比对逻辑：**
 - 草稿要求 ≥ 引用标准要求 → **优于**（草稿更严格，合规）
@@ -322,6 +334,7 @@ standard-review/
     ├── diff_checker.py             # 版本对比 diff
     ├── standard_profiles.py        # 多标准配置（5 类标准）
     ├── reference_checker.py        # 引用标准符合性检查
+    ├── std_downloader.py           # 国标自动下载（openstd.samr.gov.cn）
     ├── analyze_styles.py           # 文档样式分析
     ├── test_rules.py               # 规则测试（14 项）
     ├── test_autofix.py             # 自动修复测试（15 项）
@@ -353,6 +366,15 @@ python test_reference_check.py  # 引用标准检查测试
 ---
 
 ## 📝 更新日志
+
+### v2.7（2026-07-30）— 引用标准自动下载
+
+新增 `std_downloader.py`，实现从 openstd.samr.gov.cn 自动搜索和下载国标 PDF：
+- 自动从草稿提取引用标准清单，筛选可下载的国标类型（GB/GB-T/GB-Z）
+- 三步下载流程：搜索获取 hcno → 详情页建立会话 → 下载 PDF
+- 下载的 PDF 自动传入 R009-R012 符合性检查，实现零手动操作
+- CLI 新增 `--auto-ref`（默认开启）/ `--no-auto-ref` 参数
+- 修复 `get_summary()` 中 `matched_pairs` 始终为 0 的问题
 
 ### v2.6（2026-07-29）— 引用标准符合性检查
 
