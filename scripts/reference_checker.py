@@ -338,26 +338,43 @@ class ReferenceChecker:
         
         for i, para in enumerate(self.paragraphs):
             text = para["text"].strip()
-            # 检测"规范性引用文件"标题
-            if para.get("is_heading") or self._is_heading_text(text):
-                if "规范性引用文件" in text.replace(" ", "").replace("　", ""):
-                    in_ref_section = True
-                    ref_heading_index = i
-                    continue
-                elif in_ref_section:
-                    # 遇到下一个标题，结束引用文件章节
-                    # 但要跳过"引导语"段落（非标题）
-                    if self._is_heading_text(text):
-                        in_ref_section = False
-                        break
             
             if in_ref_section:
+                # 已在引用文件章节内：检查是否遇到下一个标题（章节结束）
+                if not self._is_toc_entry(para) and (para.get("is_heading") or self._is_heading_text(text)):
+                    if "规范性引用文件" not in text.replace(" ", "").replace("　", ""):
+                        in_ref_section = False
+                        break
+                # 收集引用文件章节内的所有段落（包括样式异常的条目）
                 self.ref_section_paras.append(para)
+            else:
+                # 尚未进入引用文件章节：跳过目次条目，避免误识别为标题
+                if self._is_toc_entry(para):
+                    continue
+                if para.get("is_heading") or self._is_heading_text(text):
+                    if "规范性引用文件" in text.replace(" ", "").replace("　", ""):
+                        in_ref_section = True
+                        ref_heading_index = i
+    
+    def _is_toc_entry(self, para: Dict) -> bool:
+        """判断段落是否为目次（TOC）条目"""
+        # 方法1：样式名包含 "toc"（不区分大小写）
+        style = para.get("style", "")
+        if style and "toc" in style.lower():
+            return True
+        # 方法2：文本含制表符后跟页码（如 "2 规范性引用文件\t1"）
+        text = para["text"].strip()
+        if re.search(r'\t\s*\d+\s*$', text):
+            return True
+        return False
     
     def _is_heading_text(self, text: str) -> bool:
         """判断文本是否为标题"""
         text = text.strip()
         if not text or len(text) > 50:
+            return False
+        # 排除目次条目（含制表符 + 页码）
+        if re.search(r'\t\s*\d+\s*$', text):
             return False
         # 编号 + 标题：如 "2 规范性引用文件"
         if re.match(r'^\d+\s+\S', text):
