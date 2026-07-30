@@ -16,7 +16,7 @@ import sys
 import json
 import argparse
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
 from collections import Counter
@@ -151,6 +151,11 @@ class StandardChecker:
         self.style_analyzer = StyleAnalyzer()
         self.doc = None
         self.section_map: Dict[int, str] = {}
+        self.page_map: Dict[str, int] = {}  # 完整标题文本 → 页码（精确匹配）
+        self._headings_by_index: Dict[int, Dict] = {}  # 段落索引 → 最近的标题项
+        self.title_to_pages: Dict[str, List[Tuple[int, int]]] = {}  # 标题文字 → [(页码, 顺序)]
+        self.heading_page_map: Dict[int, int] = {}  # 标题段落索引 → 页码（顺序对齐后）
+        self.heading_section_map: Dict[int, Tuple[str, str]] = {}  # 标题段落索引 → (章节编号, 章节标题)
         # 多标准配置
         self.profile: Optional[StandardProfile] = None
         self._pending_standard = standard  # 延迟到段落提取后再解析
@@ -264,6 +269,10 @@ class StandardChecker:
         if ref_files:
             self.ref_checker.check_compliance(ref_files)
 
+        # 后处理：将所有 issue 的 location 从"段落 X"格式
+        # 转换为"第X页，章节Y.Y 标题，文本摘要"格式
+        self._post_process_locations()
+
         return self.issues
 
     def _auto_download_references(self) -> List[str]:
@@ -357,9 +366,315 @@ class StandardChecker:
 
             if is_heading:
                 self.headings.append(item)
-    
+
+        # 从目次(TOC)解析标题→页码映射
+        self._build_page_map()
+        # 构建段落索引→最近标题的快速查找表
+        self._build_headings_index()
+
+    def _build_page_map(self) -> None:
+        """从目次(TOC)条目中解析 标题→页码 映射
+
+        构建以下映射：
+        1. self.page_map: 完整标题文本 → 页码（精确匹配）
+        2. self.heading_page_map: 正文标题段落索引 → 页码
+
+        匹配策略（章节上下文感知）：
+        - 识别章级标题（如"6 总体布置"），建立 title→chapter_num 映射
+        - 在已知当前章节的前提下，仅在当前章节内匹配同名标题
+        - 避免将"通用要求""证实方法"等常见标题错误匹配到其他章节
+        """
+        import re as _re
+
+        # Step 1: 解析目次条目
+        toc_entries = []  # [(section_num, title, page, normalized)]
+        for para in self.paragraphs:
+            text = para["text"]
+            style = para.get("style", "")
+
+            is_toc = ("toc" in style.lower() or
+                      ("\t" in text and _re.search(r'\t+\d+\s*$', text)))
+            if not is_toc:
+                continue
+
+            # 格式1: "5.3.2 技术要求\t23"
+            match = _re.match(r'^(.+?)\t+(\d+)\s*$', text)
+            if not match:
+                # 格式2: "5.3.2 技术要求...........23"
+                match = _re.match(r'^(.+?)\.{2,}\s*(\d+)\s*$', text)
+            if not match:
+                continue
+
+            raw_heading = match.group(1).strip()
+            page_num = int(match.group(2))
+            normalized = _re.sub(r'\s+', ' ', raw_heading).replace('　', ' ').strip()
+
+            # 提取编号和标题
+            sec_match = _re.match(r'^(\d+(?:\.\d+)*)\s+(.+)', normalized)
+            if sec_match:
+                section_num = sec_match.group(1)
+                title_only = sec_match.group(2).strip()
+            else:
+                section_num = ""
+                title_only = normalized
+
+            toc_entries.append((section_num, title_only, page_num, normalized))
+            self.page_map[normalized] = page_num
+
+        # Step 2: 构建查找表
+        # 章级标题: title → chapter_num（如 "总体布置" → "6"）
+        chapter_titles: Dict[str, str] = {}
+        # 编号→页码: section_num → page
+        section_to_page: Dict[str, int] = {}
+        # 标题→条目列表: title → [(section_num, page, order)]
+        title_to_entries: Dict[str, List[Tuple[str, int, int]]] = {}
+
+        for order, (sec_num, title, page, _) in enumerate(toc_entries):
+            if sec_num:
+                section_to_page[sec_num] = page
+                # 章级标题（编号无点号，如 "6"）
+                if '.' not in sec_num:
+                    chapter_titles[title] = sec_num
+            if title not in title_to_entries:
+                title_to_entries[title] = []
+            title_to_entries[title].append((sec_num, page, order))
+
+        # 保留兼容性
+        self.title_to_pages = {
+            title: [(page, order) for _, page, order in entries]
+            for title, entries in title_to_entries.items()
+        }
+
+        # Step 3: 章节上下文感知匹配
+        self.heading_page_map: Dict[int, int] = {}
+        self.heading_section_map: Dict[int, Tuple[str, str]] = {}
+        current_chapter: Optional[str] = None  # 当前章号，如 "6"
+        # 记录每个标题在当前章节内已消费的条目位置
+        consumed_orders: set = set()
+
+        for h in self.headings:
+            h_text = self._normalize_heading_text(h["text"])
+            sec_match = _re.match(r'^(\d+(?:\.\d+)*)\s+(.+)', h_text)
+            h_sec_num = sec_match.group(1) if sec_match else None
+            h_title = sec_match.group(2).strip() if sec_match else h_text
+
+            matched_page = None
+            matched_sec_num = None  # 章节编号，如 "18.3"
+            matched_sec_title = None  # 章节标题，如 "消火栓和软管站"
+
+            # 策略1: 直接编号查找（正文标题含编号时）
+            if h_sec_num and h_sec_num in section_to_page:
+                matched_page = section_to_page[h_sec_num]
+                matched_sec_num = h_sec_num
+                matched_sec_title = h_title
+                # 更新当前章节
+                if '.' not in h_sec_num:
+                    current_chapter = h_sec_num
+
+            # 策略2: 章级标题匹配（正文标题无编号但匹配章级TOC条目）
+            # 仅当标题样式为章级（"章标题"/"Heading 1"等）时才触发章节切换
+            if matched_page is None and h_title in chapter_titles:
+                h_style = h.get("style", "")
+                is_chapter_style = bool(
+                    "章标题" in h_style or
+                    "Heading 1" in h_style or
+                    h_style == "标题 1"
+                )
+                if is_chapter_style:
+                    chap = chapter_titles[h_title]
+                    # 仅当目标章号大于当前章号时才接受（避免回跳）
+                    if (current_chapter is None or
+                        (chap.isdigit() and current_chapter.isdigit() and
+                         int(chap) > int(current_chapter))):
+                        current_chapter = chap
+                        matched_page = section_to_page.get(chap)
+                        matched_sec_num = chap
+                        matched_sec_title = h_title
+
+            # 策略3: 同名标题在当前章节内匹配
+            if matched_page is None and h_title in title_to_entries:
+                entries = title_to_entries[h_title]
+                if current_chapter:
+                    # 在当前章节内查找未消费的匹配条目
+                    for sec_num, page, order in entries:
+                        if (sec_num and
+                                sec_num.startswith(current_chapter + '.') and
+                                order not in consumed_orders):
+                            matched_page = page
+                            matched_sec_num = sec_num
+                            matched_sec_title = h_title
+                            consumed_orders.add(order)
+                            break
+                    # 如果当前章节内没有，可能是子标题不在TOC中
+                    # 不跨章节匹配，留给 fill-forward 处理
+                else:
+                    # 无章节上下文（文档开头的前言/目次等）
+                    for sec_num, page, order in entries:
+                        if order not in consumed_orders:
+                            matched_page = page
+                            matched_sec_num = sec_num
+                            matched_sec_title = h_title
+                            consumed_orders.add(order)
+                            break
+
+            if matched_page is not None:
+                self.heading_page_map[h["index"]] = matched_page
+                if matched_sec_num:
+                    self.heading_section_map[h["index"]] = (matched_sec_num, matched_sec_title or h_title)
+
+        # Step 4: 填充未匹配标题的页码和章节信息——使用最近的前一个已匹配标题
+        last_page = None
+        last_section: Optional[Tuple[str, str]] = None
+        for h in self.headings:
+            if h["index"] in self.heading_page_map:
+                last_page = self.heading_page_map[h["index"]]
+                if h["index"] in self.heading_section_map:
+                    last_section = self.heading_section_map[h["index"]]
+            else:
+                if last_page is not None:
+                    self.heading_page_map[h["index"]] = last_page
+                if last_section is not None:
+                    self.heading_section_map[h["index"]] = last_section
+
+    def _build_headings_index(self) -> None:
+        """构建 段落索引→最近标题项 的快速查找表"""
+        if not self.headings:
+            return
+
+        # 对 headings 按索引排序
+        sorted_headings = sorted(self.headings, key=lambda h: h["index"])
+
+        # 为每个段落找到最近的 preceding heading
+        current_heading = sorted_headings[0] if sorted_headings else None
+
+        for para in self.paragraphs:
+            idx = para["index"]
+            # 更新到最近的标题
+            while (current_heading and
+                   sorted_headings and
+                   len(sorted_headings) > 1 and
+                   sorted_headings[1]["index"] <= idx):
+                sorted_headings.pop(0)
+                current_heading = sorted_headings[0]
+            self._headings_by_index[idx] = current_heading
+
+    def _normalize_heading_text(self, text: str) -> str:
+        """标准化标题文本以便匹配"""
+        # 去除多余空格（半角和全角）
+        text = text.replace('　', ' ')
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+
+    def _format_location(self, para_index: int) -> str:
+        """将段落索引转换为可读的位置描述
+
+        返回格式: "第X页，章节Y.Y 标题名称，文本摘要「...」"
+        如果无法确定页码，则省略页码部分。
+        """
+        # 查找最近的标题
+        nearest_heading = self._headings_by_index.get(para_index)
+
+        # 获取段落文本摘要
+        para_text = ""
+        for p in self.paragraphs:
+            if p["index"] == para_index:
+                para_text = p["text"]
+                break
+
+        parts = []
+
+        if nearest_heading:
+            heading_idx = nearest_heading["index"]
+            normalized_heading = self._normalize_heading_text(nearest_heading["text"])
+
+            # 优先使用 heading_section_map 中的章节编号（来自TOC匹配）
+            section_info = self.heading_section_map.get(heading_idx)
+            if section_info:
+                sec_num, sec_title = section_info
+                parts.append(f"章节{sec_num} {sec_title}")
+            else:
+                # 回退：从标题文本中提取编号
+                section_match = re.match(r'^(\d+(?:\.\d+)*)\s+(.+)', normalized_heading)
+                if section_match:
+                    parts.append(f"章节{section_match.group(1)} {section_match.group(2)}")
+                else:
+                    parts.append(f"章节 {normalized_heading}")
+
+            # 查找页码：优先用 heading_page_map
+            page_num = self.heading_page_map.get(heading_idx)
+            if page_num is None:
+                page_num = self.page_map.get(normalized_heading)
+            if page_num:
+                parts.insert(0, f"第{page_num}页")
+
+        # 添加文本摘要（方便 Ctrl+F 搜索）
+        if para_text:
+            snippet = para_text[:60]
+            if len(para_text) > 60:
+                snippet += "..."
+            parts.append(f"文本「{snippet}」")
+
+        if parts:
+            return "，".join(parts)
+        else:
+            return f"段落 {para_index}"
+
+    def _post_process_locations(self) -> None:
+        """后处理所有 issue 的 location 字段
+
+        将 "段落 X"、"位置 X"、"草稿, 段落 X"、"规范性引用文件, 段落 X"
+        替换为 "第X页，章节Y.Y 标题，文本摘要" 格式。
+        """
+        # 匹配各种包含段落索引的 location 格式
+        # 格式1: "段落 123"
+        # 格式2: "位置 45"
+        # 格式3: "草稿, 段落 123"
+        # 格式4: "规范性引用文件, 段落 15"
+        # 格式5: "草稿, 段落 123" (reference_checker 格式)
+        para_pattern = re.compile(r'^(.*?)段落\s*(\d+)\s*$')
+        pos_pattern = re.compile(r'^位置\s*(\d+)\s*$')
+
+        for issue in self.issues:
+            loc = issue.location
+
+            # 跳过 "整体"、"标题" 等非索引格式
+            if loc in ("整体", "标题", ""):
+                continue
+
+            # 匹配 "位置 X" 格式
+            m = pos_pattern.match(loc)
+            if m:
+                idx = int(m.group(1))
+                issue.location = self._format_location(idx)
+                continue
+
+            # 匹配各种 "xxx, 段落 X" 或 "段落 X" 格式
+            m = para_pattern.match(loc)
+            if m:
+                prefix = m.group(1).strip().rstrip(',').strip()  # 如 "草稿"、"规范性引用文件"、""
+                idx = int(m.group(2))
+
+                # 引用标准文件中的段落索引无意义（PDF 内部索引）
+                # 保留文件名，去除段落索引
+                if prefix and prefix not in ("草稿", "规范性引用文件"):
+                    # 如 "GB-T1.1-2020.docx, 段落 23" → 保留文件名
+                    issue.location = prefix
+                    continue
+
+                formatted = self._format_location(idx)
+                # 如果有前缀（如"草稿"），添加到开头
+                if prefix and prefix != "规范性引用文件":
+                    issue.location = f"{prefix}，{formatted}"
+                else:
+                    issue.location = formatted
+                continue
+
     def _is_heading(self, text: str, style_name: str) -> bool:
         """智能判断是否为标题"""
+
+        # 0. 排除目次条目（含制表符+页码的TOC条目不应被视为正文标题）
+        if '\t' in text and re.search(r'\t+\d+\s*$', text):
+            return False
 
         # 1. 使用样式分析器的结果
         if style_name in self.style_analyzer.heading_styles:
