@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.7+-green.svg)](https://www.python.org/)
 [![GB/T 1.1-2020](https://img.shields.io/badge/GB%2FT%201.1-2020-orange.svg)](https://std.samr.gov.cn/)
-[![Version](https://img.shields.io/badge/version-2.7-purple.svg)](https://github.com/surfy2024/standard-review/releases)
+[![Version](https://img.shields.io/badge/version-2.8-purple.svg)](https://github.com/surfy2024/standard-review/releases)
 [![AI Enhanced](https://img.shields.io/badge/AI-Enhanced-blue.svg)](https://github.com/surfy2024/standard-review)
 
 ---
@@ -21,7 +21,8 @@
 | 📄 **多格式支持** | 同时支持 .docx 和 .pdf 输入，检测结果完全一致 |
 | 🔄 **版本对比** | 新旧版本草稿 diff，区分新增/已修复/持续存在问题 |
 | 📚 **多标准支持** | 国家/行业/地方/企业/团体 5 类标准，自动检测 + 差异化规则 |
-| 🔗 **引用标准符合性检查** | 引用提取、交叉一致性、**自动下载国标 PDF**、指标级符合性比对 |
+| 🔗 **引用标准符合性检查** | 引用提取、交叉一致性、**自动下载国标 PDF**、指标级符合性比对、不符合问题完整条款对比 |
+| 🎯 **精准定位** | "第X页，章节Y.Y 标题，文本摘要"格式，章节上下文感知匹配（99.3%页码匹配率） |
 
 ---
 
@@ -366,6 +367,21 @@ python test_reference_check.py  # 引用标准检查测试
 ---
 
 ## 📝 更新日志
+
+### v2.8（2026-07-30）— 精准定位与 R012 增强
+
+**精准定位**：问题位置从"段落X"升级为"第X页，章节Y.Y 标题，文本摘要"格式
+- 新增章节上下文感知匹配算法，从目次解析标题→页码映射（99.3%匹配率）
+- 仅"章标题"样式触发章节切换，避免同名子标题误匹配
+- 修复 `_post_process_locations` 中 prefix 逗号残留导致 R012/R004/R008 位置格式化失败
+- 修复 `_is_heading` 中 TOC 条目泄漏到标题列表
+
+**R012 符合性比对增强**：不符合问题包含完整条款对比
+- 草稿条款全文 + 引用标准条款全文（含来源标注）+ 指标对比表 + 对比结论
+- 新增 `_extract_source_name()` 提取引用标准来源名称
+- 条款文本不再截断（之前截断到60字符）
+
+**HTML 报告改进**：R012 上下文默认展开、suggestion 字段支持换行、escape_html 保留换行符
 
 ### v2.7（2026-07-30）— 引用标准自动下载
 
