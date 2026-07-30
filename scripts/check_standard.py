@@ -156,13 +156,15 @@ class StandardChecker:
         self._pending_standard = standard  # 延迟到段落提取后再解析
         
     def check(self, file_path: str, analyze_styles: bool = False,
-              ref_files: List[str] = None) -> List[Issue]:
+              ref_files: List[str] = None,
+              auto_ref: bool = True) -> List[Issue]:
         """执行检查（支持 .docx 和 .pdf 格式）
 
         Args:
             file_path: 输入文件路径
             analyze_styles: 是否分析文档样式
             ref_files: 引用标准文档路径列表（用于符合性检查，可选）
+            auto_ref: 是否自动从 openstd.samr.gov.cn 下载引用标准（默认 True）
         """
         input_path = Path(file_path)
         if not input_path.exists():
@@ -254,12 +256,77 @@ class StandardChecker:
         )
         self.ref_checker.check_auto()
 
+        # 自动下载引用标准（当用户未提供 ref_files 且 auto_ref 开启时）
+        if auto_ref and not ref_files:
+            ref_files = self._auto_download_references()
+
         # 用户提交层：符合性检查（仅当提供了引用标准文档时）
         if ref_files:
             self.ref_checker.check_compliance(ref_files)
 
         return self.issues
-    
+
+    def _auto_download_references(self) -> List[str]:
+        """自动从 openstd.samr.gov.cn 下载引用标准
+
+        从草稿的规范性引用文件章节提取标准号，自动搜索并下载
+        可下载的国标（GB/GB-T/GB-Z）PDF 文件。
+
+        Returns:
+            下载成功的文件路径列表
+        """
+        ref_numbers = self.ref_checker.get_reference_numbers()
+        if not ref_numbers:
+            print("\n=== 自动下载引用标准 ===")
+            print("  草稿中未找到引用标准，跳过自动下载")
+            return []
+
+        # 筛选可下载的国标类型
+        try:
+            from std_downloader import StdDownloader
+        except ImportError:
+            print("  警告：std_downloader 模块不可用，跳过自动下载")
+            return []
+
+        downloadable = [
+            n for n in ref_numbers
+            if StdDownloader.is_downloadable_type(n)
+        ]
+        skipped = [
+            n for n in ref_numbers
+            if not StdDownloader.is_downloadable_type(n)
+        ]
+
+        if not downloadable:
+            print("\n=== 自动下载引用标准 ===")
+            print(f"  草稿中有 {len(ref_numbers)} 个引用标准，"
+                  f"但均为非国标类型，无法自动下载")
+            if skipped:
+                print(f"  非国标标准: {', '.join(skipped[:5])}"
+                      f"{'...' if len(skipped) > 5 else ''}")
+            return []
+
+        print(f"\n=== 自动下载引用标准 ===")
+        print(f"  草稿中有 {len(ref_numbers)} 个引用标准，"
+              f"其中 {len(downloadable)} 个为国标（可尝试下载）")
+        if skipped:
+            print(f"  跳过 {len(skipped)} 个非国标: "
+                  f"{', '.join(skipped[:5])}"
+                  f"{'...' if len(skipped) > 5 else ''}")
+
+        # 创建下载器并批量下载
+        import tempfile
+        download_dir = tempfile.mkdtemp(prefix="std_ref_")
+        dl = StdDownloader(output_dir=download_dir, verbose=True)
+        downloaded = dl.download_batch(downloadable)
+
+        if downloaded:
+            print(f"\n  自动下载完成: {len(downloaded)}/{len(downloadable)} 个标准")
+            return list(downloaded.values())
+        else:
+            print("\n  自动下载未获得任何文件")
+            return []
+
     def _extract_structure(self, doc) -> None:
         """提取文档结构"""
         current_section = ""
@@ -1301,6 +1368,14 @@ def main():
         "--ref-dir",
         help="引用标准文档目录路径（自动加载目录下所有 .docx 和 .pdf 文件）"
     )
+    parser.add_argument(
+        "--auto-ref", dest="auto_ref", action="store_true", default=True,
+        help="自动从 openstd.samr.gov.cn 下载引用标准（默认开启）"
+    )
+    parser.add_argument(
+        "--no-auto-ref", dest="auto_ref", action="store_false",
+        help="禁用自动下载引用标准"
+    )
 
     args = parser.parse_args()
 
@@ -1352,7 +1427,8 @@ def main():
             print(f"从 {ref_dir} 加载了 {len(ref_files)} 个引用标准文件")
 
     issues = checker.check(str(input_path), analyze_styles=args.analyze_styles,
-                           ref_files=ref_files if ref_files else None)
+                           ref_files=ref_files if ref_files else None,
+                           auto_ref=args.auto_ref)
     
     # 输出结果
     result = {
