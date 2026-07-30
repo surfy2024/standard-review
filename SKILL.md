@@ -3,7 +3,7 @@ name: standard-review
 description: 基于 GB/T 1.1-2020 标准要求，审查标准草稿在格式编排、结构要素、规范性用词和文字表述四个维度的错误，并给出修改建议。适用于：(1) 审查国家标准、行业标准、地方标准或企业标准草案；(2) 检查标准文档是否符合 GB/T 1.1-2020 规定；(3) 用户说"审查标准"、"校审标准草稿"、"检查标准格式"、"标准文档审核"等请求时触发。
 ---
 
-# 标准草稿校审 Skill（v2.6 - 引用标准符合性检查版）
+# 标准草稿校审 Skill（v2.7 - 引用标准自动下载版）
 
 ## 概述
 
@@ -17,7 +17,7 @@ description: 基于 GB/T 1.1-2020 标准要求，审查标准草稿在格式编�
 - 📄 **多格式支持** - 支持 .docx 和 .pdf 两种输入格式，检测结果完全一致
 - 🔄 **版本对比** - 新旧版本草稿对比，只审查变更部分，区分新增/已修复/持续存在问题
 - 📚 **多标准支持** - 自动识别国家标准、行业标准、地方标准、企业标准、团体标准，按类型启用差异化规则
-- 🔗 **引用标准符合性检查** - 自动提取引用标准、检查交叉引用一致性；用户提交引用标准文档后，自动提取要求性条款并进行指标级符合性比对
+- 🔗 **引用标准符合性检查** - 自动提取引用标准、检查交叉引用一致性；**自动从 openstd.samr.gov.cn 下载国标 PDF**（无需用户手动准备），提取要求性条款并进行指标级符合性比对
 - 🎯 **精准定位** - 准确识别问题位置和类型
 - 📋 **结构化报告** - 输出清晰的审查报告（Markdown + HTML 双格式）
 
@@ -267,7 +267,7 @@ python scripts/diff_checker.py old.docx new.docx --standard gb-local
 
 ### 第七步：引用标准符合性检查
 
-> **重要**：此步骤为必选步骤。脚本检查完成后，**必须主动询问用户**是否拥有引用标准文档（.docx 或 .pdf），以执行 R009-R012 要求符合性比对。即使用户没有引用标准文档，自动层 R001-R008 也会始终运行。
+> **重要**：此步骤为必选步骤。脚本会**自动从 openstd.samr.gov.cn 下载引用标准**（国标 GB/GB-T/GB-Z），无需用户手动准备文件。自动层 R001-R008 始终运行；R009-R012 在自动下载成功后自动执行。用户也可通过 `--ref` 手动提交非国标引用标准文档（如行业标准）。
 
 检查脚本新增引用标准符合性检查功能，分两层运行：
 
@@ -284,11 +284,23 @@ python scripts/diff_checker.py old.docx new.docx --standard gb-local
 | R007 | 正文中引用但未在"规范性引用文件"中列出 → 缺失引用 |
 | R008 | "规范性引用文件"中列出但正文从未引用 → 冗余引用 |
 
-**用户提交层（询问用户后启用）**：
+**自动下载层（默认开启，无需用户干预）**：
 
-**审查流程中必须向用户询问**："您是否有本草稿引用的标准文档（如 GB/T 1.1-2020、GB/T 7714 等）？如有，请提供文件路径，我将执行要求符合性比对（R009-R012）。"
+脚本自动从草稿提取引用标准清单，然后：
+1. 筛选可下载的国标类型（GB 强制性、GB/T 推荐性、GB/Z 指导性）
+2. 通过 openstd.samr.gov.cn 搜索标准 → 获取唯一标识 hcno
+3. 三步下载流程：访问详情页 → 激活下载权限 → 下载 PDF
+4. 跳过非国标（行业标准等）和废止标准
+5. 下载的 PDF 自动传入符合性检查
 
-用户提供引用标准文档后，通过 `--ref` 参数传入，工具自动执行：
+**限制**：
+- 采标标准（采用国际标准的）仅支持在线阅读，不可下载
+- 工程建设国家标准不在收录范围
+- 少量标准可能触发验证码，导致下载失败（脚本会跳过并继续）
+
+**用户提交层（可选，用于补充非国标标准）**：
+
+如果草稿引用了行业标准（如 SY/T、HJ 等），用户可通过 `--ref` 手动提交：
 
 | 规则 | 检查内容 |
 |------|---------|
@@ -300,12 +312,15 @@ python scripts/diff_checker.py old.docx new.docx --standard gb-local
 **使用方式**：
 
 ```bash
-# 基础检查（自动层，零额外输入）
+# 基础检查 + 自动下载引用标准（默认行为，零额外输入）
 python scripts/check_standard.py input.docx
 
-# 符合性检查（提交引用标准文档）
+# 禁用自动下载（仅运行自动层 R001-R008）
+python scripts/check_standard.py input.docx --no-auto-ref
+
+# 自动下载 + 手动补充非国标引用标准
 python scripts/check_standard.py input.docx \
-  --ref GB-T1.1-2020.docx --ref GB-T7714-2015.pdf
+  --ref SY-T-6276.pdf --ref HJ-169.docx
 
 # 或指定引用标准目录
 python scripts/check_standard.py input.docx --ref-dir ./references/
@@ -520,6 +535,20 @@ python scripts/generate_html_report.py result.json --output report.html
 
 ## 更新日志
 
+### v2.7（2026-07-30）
+
+**引用标准自动下载**（新增 std_downloader.py）：
+- ✅ 自动从 openstd.samr.gov.cn 搜索并下载国标 PDF（GB/GB-T/GB-Z）
+- ✅ 三步下载流程：搜索获取 hcno → 详情页建立会话 → 下载 PDF
+- ✅ 自动跳过非国标（行业标准等）、废止标准、采标标准
+- ✅ 下载的 PDF 自动传入 R009-R012 符合性检查，实现零手动操作
+- ✅ CLI 新增 `--auto-ref`（默认开启）/ `--no-auto-ref` 参数
+- ✅ check_standard.py 新增 `_auto_download_references()` 方法
+- ✅ reference_checker.py 新增 `get_reference_numbers()` 方法
+- ✅ diff_checker.py 禁用自动下载（版本对比场景不需要）
+- ✅ 修复 `get_summary()` 中 `matched_pairs` 始终为 0 的问题
+- ✅ FPSO 安全规范草稿端到端测试：8 个引用标准 → 5 个自动下载成功 → 730 条要求条款 → 20 对匹配 → 2 个 R012 指标比对发现
+
 ### v2.6.1（2026-07-30）
 
 **Bug 修复**：
@@ -529,7 +558,7 @@ python scripts/generate_html_report.py result.json --output report.html
 
 ### v2.6（2026-07-29）
 
-**引用标准符合性检查**（新增 reference_checker.py）：
+**引用标准符合性检查**（reference_checker.py + std_downloader.py）：
 
 自动层（R001-R008，无需额外输入）：
 - ✅ R001: 从"规范性引用文件"章节提取所有引用标准编号（GB/T、GB、YY/T、HJ、DBXX/T、Q/、T/、ISO、IEC 等）
@@ -541,15 +570,21 @@ python scripts/generate_html_report.py result.json --output report.html
 - ✅ R007: 缺失引用检测（正文引用但未在引用文件中列出）
 - ✅ R008: 冗余引用检测（引用文件中列出但正文未引用）
 
+自动下载层（新增 std_downloader.py）：
+- ✅ 自动从草稿提取引用标准清单
+- ✅ 从 openstd.samr.gov.cn 搜索国标（GB/GB-T/GB-Z），获取唯一标识 hcno
+- ✅ 三步下载流程：详情页建立会话 → 激活下载权限 → 下载 PDF
+- ✅ 自动跳过非国标（行业标准等）、废止标准、采标标准
+- ✅ CLI 新增 `--auto-ref`（默认开启）/ `--no-auto-ref` 参数
+- ✅ 下载的 PDF 自动传入 R009-R012 符合性检查
+
 用户提交层（R009-R012，需提供 `--ref` 文件）：
-- ✅ R009: 从用户提交的引用标准文档（PDF/DOCX）中提取要求性条款（应/必须/不得/宜/可）
+- ✅ R009: 从引用标准文档（自动下载或用户提交的 PDF/DOCX）中提取要求性条款（应/必须/不得/宜/可）
 - ✅ R010: 从草稿中提取对应要求性条款，建立要求清单
 - ✅ R011: 语义匹配——按关键词 Jaccard 相似度将草稿要求与引用标准要求关联
 - ✅ R012: 指标级比对——提取数值指标（不低于/不大于/≥/≤等），比对草稿 vs 引用标准 → 不符合/符合/优于
 - ✅ CLI 新增 `--ref` 参数（可多次指定）和 `--ref-dir` 参数（目录批量加载）
-- ✅ 结果 JSON 新增 `reference_check` 字段（含引用标准列表、要求条款统计）
-- ✅ 新增测试脚本 test_reference_check.py，54 项验证全部通过
-- ✅ 原有测试无回归（test_rules.py、test_autofix.py 全部通过）
+- ✅ 结果 JSON 新增 `reference_check` 字段（含引用标准列表、要求条款统计、匹配对数）
 
 ### v2.5（2026-07-29）
 
