@@ -817,77 +817,131 @@ class ReferenceChecker:
     
     def _compare_indicators(self, matched_pairs: List[Tuple[RequirementClause, RequirementClause, float]]) -> None:
         """R012: 指标级比对——草稿要求 vs 引用标准要求"""
-        
+
         for draft_req, ref_req, similarity in matched_pairs:
             # 如果两边都没有指标，无法比较，跳过
             if not draft_req.indicators and not ref_req.indicators:
                 continue
-            
+
+            # 提取引用标准来源名称
+            ref_source = self._extract_source_name(ref_req.source)
+
             # 如果草稿有指标但引用标准没有指标，无法判断
             if draft_req.indicators and not ref_req.indicators:
+                context = (
+                    f"【草稿条款】\n{draft_req.text}\n\n"
+                    f"【引用标准条款】（来源：{ref_source}）\n{ref_req.text}\n\n"
+                    f"【分析】草稿含定量指标但引用标准中未找到对应指标，无法判断符合性\n"
+                    f"匹配相似度: {similarity:.0%}"
+                )
                 self._safe_add_issue(
                     "R012", "SUGGESTION",
                     draft_req.location,
-                    f"草稿要求含定量指标，但引用标准中未找到对应指标，无法判断符合性",
-                    f"草稿：{draft_req.text[:60]}...\n引用标准：{ref_req.text[:60]}...",
-                    f"相似度: {similarity:.0%}"
+                    f"草稿要求含定量指标，但引用标准（{ref_source}）中未找到对应指标，无法判断符合性",
+                    f"建议人工核查草稿指标是否与{ref_source}的要求一致",
+                    context
                 )
                 continue
-            
+
             # 如果引用标准有指标但草稿没有
             if not draft_req.indicators and ref_req.indicators:
+                ref_ind_str = "；".join(
+                    f"{ind['comp']} {ind['value']}{ind['unit']}" for ind in ref_req.indicators
+                )
+                context = (
+                    f"【草稿条款】\n{draft_req.text}\n\n"
+                    f"【引用标准条款】（来源：{ref_source}）\n{ref_req.text}\n\n"
+                    f"【引用标准指标】{ref_ind_str}\n\n"
+                    f"【分析】引用标准有定量指标但草稿中未规定，可能导致不符合\n"
+                    f"匹配相似度: {similarity:.0%}"
+                )
                 self._safe_add_issue(
                     "R012", "WARNING",
                     draft_req.location,
-                    f"引用标准有定量指标但草稿中未规定，可能导致不符合",
-                    f"引用标准要求：{ref_req.text[:80]}...",
-                    f"草稿：{draft_req.text[:60]}...\n相似度: {similarity:.0%}"
+                    f"引用标准（{ref_source}）有定量指标但草稿中未规定，可能导致不符合",
+                    f"建议在草稿中补充引用标准{ref_source}的指标要求：{ref_ind_str}",
+                    context
                 )
                 continue
-            
+
             # 两边都有指标，进行比对
             for d_ind in draft_req.indicators:
                 for r_ind in ref_req.indicators:
                     # 只有单位相同（或一方无单位）才比较
                     if d_ind['unit'] and r_ind['unit'] and d_ind['unit'] != r_ind['unit']:
                         continue
-                    
+
                     result = self._compare_single_indicator(d_ind, r_ind)
-                    
+
+                    d_ind_str = f"{d_ind['comp']} {d_ind['value']}{d_ind['unit']}"
+                    r_ind_str = f"{r_ind['comp']} {r_ind['value']}{r_ind['unit']}"
+
                     if result == "不符合":
+                        context = (
+                            f"【草稿条款】\n{draft_req.text}\n\n"
+                            f"【引用标准条款】（来源：{ref_source}）\n{ref_req.text}\n\n"
+                            f"【指标对比】\n"
+                            f"  草稿指标：{d_ind_str}\n"
+                            f"  引用标准指标：{r_ind_str}\n\n"
+                            f"【对比结果】草稿要求低于引用标准要求\n"
+                            f"  根据GB/T 1.1-2020，新标准的要求不应低于现行标准的要求。\n"
+                            f"匹配相似度: {similarity:.0%}"
+                        )
                         self._safe_add_issue(
                             "R012", "ERROR",
                             draft_req.location,
-                            f"草稿要求可能不符合引用标准要求",
-                            f"草稿：{d_ind['comp']} {d_ind['value']}{d_ind['unit']}\n"
-                            f"引用标准：{r_ind['comp']} {r_ind['value']}{r_ind['unit']}\n"
-                            f"草稿要求低于引用标准要求，新标准不应低于现行标准",
-                            f"草稿条款：{draft_req.text[:60]}...\n"
-                            f"引用条款：{ref_req.text[:60]}...\n"
-                            f"相似度: {similarity:.0%}"
+                            f"草稿指标「{d_ind_str}」不符合引用标准{ref_source}的要求「{r_ind_str}」",
+                            f"草稿要求低于引用标准要求，应调整草稿指标使其不低于{ref_source}的要求（{r_ind_str}）",
+                            context
                         )
                     elif result == "优于":
+                        context = (
+                            f"【草稿条款】\n{draft_req.text}\n\n"
+                            f"【引用标准条款】（来源：{ref_source}）\n{ref_req.text}\n\n"
+                            f"【指标对比】\n"
+                            f"  草稿指标：{d_ind_str}\n"
+                            f"  引用标准指标：{r_ind_str}\n\n"
+                            f"【对比结果】草稿要求严于引用标准，符合要求\n"
+                            f"匹配相似度: {similarity:.0%}"
+                        )
                         self._safe_add_issue(
                             "R012", "SUGGESTION",
                             draft_req.location,
-                            f"草稿要求优于引用标准要求",
-                            f"草稿：{d_ind['comp']} {d_ind['value']}{d_ind['unit']}\n"
-                            f"引用标准：{r_ind['comp']} {r_ind['value']}{r_ind['unit']}\n"
-                            f"草稿要求严于引用标准，符合要求",
-                            f"草稿条款：{draft_req.text[:60]}...\n"
-                            f"引用条款：{ref_req.text[:60]}...\n"
-                            f"相似度: {similarity:.0%}"
+                            f"草稿指标「{d_ind_str}」优于引用标准{ref_source}的要求「{r_ind_str}」",
+                            f"草稿要求严于引用标准，符合要求，无需修改",
+                            context
                         )
                     elif result == "符合":
+                        context = (
+                            f"【草稿条款】\n{draft_req.text}\n\n"
+                            f"【引用标准条款】（来源：{ref_source}）\n{ref_req.text}\n\n"
+                            f"【指标对比】\n"
+                            f"  草稿指标：{d_ind_str}\n"
+                            f"  引用标准指标：{r_ind_str}\n\n"
+                            f"【对比结果】草稿要求与引用标准一致\n"
+                            f"匹配相似度: {similarity:.0%}"
+                        )
                         self._safe_add_issue(
                             "R012", "SUGGESTION",
                             draft_req.location,
-                            f"草稿要求与引用标准要求一致",
-                            f"草稿：{d_ind['comp']} {d_ind['value']}{d_ind['unit']}\n"
-                            f"引用标准：{r_ind['comp']} {r_ind['value']}{r_ind['unit']}",
-                            f"相似度: {similarity:.0%}"
+                            f"草稿指标「{d_ind_str}」与引用标准{ref_source}的要求一致",
+                            f"草稿要求与引用标准一致，符合要求",
+                            context
                         )
-    
+
+    def _extract_source_name(self, source: str) -> str:
+        """从 source 字段提取引用标准名称
+
+        如 "reference:GB_3836.16-2024.pdf" → "GB 3836.16-2024"
+        """
+        if not source or source == "draft":
+            return "草稿"
+        # 格式: "reference:GB_3836.16-2024.pdf"
+        name = source.replace("reference:", "").replace(".pdf", "")
+        # 将下划线转为空格: "GB_3836.16-2024" → "GB 3836.16-2024"
+        name = name.replace("_", " ")
+        return name
+
     def _compare_single_indicator(self, draft_ind: Dict, ref_ind: Dict) -> str:
         """比较单个指标
         
