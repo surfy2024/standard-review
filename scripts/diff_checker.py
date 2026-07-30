@@ -99,12 +99,12 @@ class DiffChecker:
         # 1. 分别检查两个版本
         print(f"正在检查旧版本：{old_path}")
         self.old_checker = StandardChecker(standard=self._pending_standard)
-        old_issues = self.old_checker.check(old_path)
+        old_issues = self.old_checker.check(old_path, auto_ref=False)
         self.old_paragraphs = list(self.old_checker.paragraphs)
 
         print(f"正在检查新版本：{new_path}")
         self.new_checker = StandardChecker(standard=self._pending_standard)
-        new_issues = self.new_checker.check(new_path)
+        new_issues = self.new_checker.check(new_path, auto_ref=False)
         self.new_paragraphs = list(self.new_checker.paragraphs)
 
         # 2. 计算段落级 diff
